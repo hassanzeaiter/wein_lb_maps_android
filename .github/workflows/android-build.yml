@@ -28,10 +28,19 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
+      # On pull_request, github.ref_name is "<pr>/merge" — the slash is illegal in an
+      # artifact name. Use the PR's source branch on PRs, the branch on push, and strip
+      # any remaining slashes (e.g. feature/x -> feature-x).
+      - name: Compute artifact name
+        id: meta
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          echo "name=wein-debug-apk-${BRANCH//\//-}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: wein-debug-apk-${{ github.ref_name }}-${{ github.run_number }}
+          name: ${{ steps.meta.outputs.name }}
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
