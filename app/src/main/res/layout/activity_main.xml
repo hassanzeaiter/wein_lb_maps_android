@@ -1,0 +1,965 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <org.maplibre.android.maps.MapView
+        android:id="@+id/mapView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top: search + results -->
+    <LinearLayout
+        android:id="@+id/topContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="vertical">
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/searchCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            app:cardBackgroundColor="@color/paper"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="4dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="Search"
+                    android:src="@drawable/ic_search"
+                    app:tint="@color/ink_muted" />
+
+                <EditText
+                    android:id="@+id/searchInput"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="Search a landmark in Beirut"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="14dp"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/ink_muted"
+                    android:textSize="16sp" />
+
+                <ImageButton
+                    android:id="@+id/clearBtn"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Clear"
+                    android:src="@drawable/ic_close"
+                    android:visibility="gone"
+                    app:tint="@color/ink_muted" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/resultsCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="@color/paper"
+            app:cardCornerRadius="18dp"
+            app:cardElevation="4dp">
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fillViewport="false">
+
+                <LinearLayout
+                    android:id="@+id/resultsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </ScrollView>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+
+    <!-- Locate-me button -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/locateFab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="88dp"
+        android:contentDescription="Use my location"
+        android:src="@drawable/ic_my_location"
+        app:backgroundTint="#FFFFFF"
+        app:fabSize="normal" />
+
+    <!-- Turn banner (nav mode) -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/navBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_margin="12dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#1F2431"
+        app:cardCornerRadius="22dp"
+        app:cardElevation="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/navArrow"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/nav_arrow_bg"
+                android:gravity="center"
+                android:text="↱"
+                android:textColor="#202124"
+                android:textSize="32sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/navDist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#BDC1C6"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/navTurn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Bottom nav bar (nav mode) -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/navBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_margin="12dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="@color/paper"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="12dp">
+
+            <TextView
+                android:id="@+id/navRemaining"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/ink"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/muteBtn"
+                style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="10dp"
+                android:backgroundTint="@color/surface_alt"
+                android:contentDescription="Mute voice"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                app:icon="@drawable/ic_volume_up"
+                app:iconTint="@color/ink" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/endNavBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:backgroundTint="@color/danger"
+                android:paddingHorizontal="24dp"
+                android:text="End"
+                android:textAllCaps="false"
+                android:textColor="@color/paper"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                app:cornerRadius="14dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Directions bottom sheet -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/directionsCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardBackgroundColor="@color/paper"
+        app:cardElevation="12dp"
+        app:shapeAppearanceOverlay="@style/SheetShape"
+        app:behavior_hideable="true"
+        app:behavior_peekHeight="306dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+        <LinearLayout
+            android:id="@+id/sheetContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="18dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="18dp">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp">
+
+                <View
+                    android:layout_width="40dp"
+                    android:layout_height="5dp"
+                    android:layout_gravity="center_horizontal|top"
+                    android:layout_marginTop="2dp"
+                    android:background="@drawable/sheet_handle" />
+
+                <ImageButton
+                    android:id="@+id/closeSheetBtn"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:layout_gravity="end|top"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Close"
+                    android:src="@drawable/ic_close"
+                    app:tint="@color/ink_muted" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/routeTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/ink"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/routeMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:textColor="@color/ink_muted"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/modeRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnDrive"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Drive"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_directions_car"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnWalk"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Walk"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_directions_walk"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTaxi"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Taxi"
+                    android:textAllCaps="false"
+                    android:textSize="14sp"
+                    app:cornerRadius="14dp"
+                    app:icon="@drawable/ic_taxi"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp" />
+            </LinearLayout>
+
+            <!-- Taxi mode: Uber-style ride options + request flow (built at runtime) -->
+            <LinearLayout
+                android:id="@+id/taxiPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/startNavBtn"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/go"
+                android:text="Start"
+                android:textAllCaps="false"
+                android:textColor="@color/paper"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                app:cornerRadius="16dp"
+                app:icon="@drawable/ic_nav"
+                app:iconGravity="textStart"
+                app:iconTint="@color/paper" />
+
+            <TextView
+                android:id="@+id/stepsHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="STEPS"
+                android:textColor="@color/ink_muted"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08" />
+
+            <LinearLayout
+                android:id="@+id/stepsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical" />
+        </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- ===== Explore home (places directory) — the default screen ===== -->
+    <LinearLayout
+        android:id="@+id/exploreScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paper"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/exploreHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Wein"
+                android:textColor="@color/ink"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/mapFab"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:backgroundTint="@color/surface_alt"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Map"
+                android:textAllCaps="false"
+                android:textColor="@color/ink"
+                android:textSize="14sp"
+                app:cornerRadius="20dp"
+                app:icon="@drawable/ic_map"
+                app:iconGravity="textStart"
+                app:iconTint="@color/ink" />
+        </LinearLayout>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="14dp"
+            android:layout_marginTop="4dp"
+            app:cardBackgroundColor="@color/surface_alt"
+            app:cardCornerRadius="26dp"
+            app:cardElevation="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="Search"
+                    android:src="@drawable/ic_search"
+                    app:tint="@color/ink_muted" />
+
+                <EditText
+                    android:id="@+id/exploreSearch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="Search places, food, gas…"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="13dp"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/ink_muted"
+                    android:textSize="16sp" />
+
+                <ImageButton
+                    android:id="@+id/exploreClear"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Clear"
+                    android:src="@drawable/ic_close"
+                    android:visibility="gone"
+                    app:tint="@color/ink_muted" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:paddingHorizontal="14dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/chipsRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/resultsCount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="2dp"
+            android:textColor="@color/ink_muted"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/placesList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="90dp" />
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+
+    <!-- Re-center (nav mode, after the user pans away) -->
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/recenterBtn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="96dp"
+        android:backgroundTint="#FFFFFF"
+        android:text="Re-center"
+        android:textColor="@color/ink"
+        android:visibility="gone"
+        app:icon="@drawable/ic_my_location"
+        app:iconTint="@color/ink" />
+
+    <!-- Back-to-list (map mode) -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/listFab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="88dp"
+        android:contentDescription="Back to list"
+        android:src="@drawable/ic_list"
+        android:visibility="gone"
+        app:backgroundTint="#FFFFFF"
+        app:fabSize="normal" />
+
+    <!-- ===== Contribute tab ===== -->
+    <LinearLayout
+        android:id="@+id/contributeScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paper"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/contributeHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="4dp"
+            android:text="Contribute"
+            android:textColor="@color/ink"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="20dp"
+            android:paddingBottom="8dp"
+            android:text="Help build Lebanon's directory. Every place, photo and review makes Wein better."
+            android:textColor="@color/ink_muted"
+            android:textSize="14sp" />
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/contributeList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="90dp" />
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+
+    <!-- ===== Profile tab ===== -->
+    <LinearLayout
+        android:id="@+id/profileScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paper"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/profileHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="10dp"
+            android:text="Profile"
+            android:textColor="@color/ink"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="8dp">
+
+            <ImageView
+                android:layout_width="58dp"
+                android:layout_height="58dp"
+                android:background="@drawable/thumb_bg"
+                android:padding="14dp"
+                android:src="@drawable/ic_tab_profile"
+                app:tint="#3C4043" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Guest"
+                    android:textColor="@color/ink"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Sign in to save places &amp; review"
+                    android:textColor="@color/ink_muted"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/signInBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:backgroundTint="@color/ink"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Sign in"
+                android:textAllCaps="false"
+                android:textColor="@color/paper"
+                app:cornerRadius="21dp" />
+        </LinearLayout>
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/profileList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="90dp" />
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+
+    <!-- ===== Place detail screen (custom parallax header, works on all devices) ===== -->
+    <FrameLayout
+        android:id="@+id/placeDetailScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paper"
+        android:visibility="gone">
+
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/detailScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:id="@+id/detailHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="230dp"
+                    android:background="@drawable/detail_header_bg">
+
+                    <ImageView
+                        android:id="@+id/detailHeaderIcon"
+                        android:layout_width="88dp"
+                        android:layout_height="88dp"
+                        android:layout_gravity="center"
+                        android:alpha="0.32"
+                        app:tint="#3C4043" />
+                </FrameLayout>
+
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="20dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="32dp">
+
+                <TextView
+                    android:id="@+id/detailPromoted"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:background="@drawable/chip_bg"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="3dp"
+                    android:text="Promoted"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/detailName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/ink"
+                    android:textSize="25sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/detailRating"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/ink"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/detailMeta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:textColor="@color/ink_muted"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/detailLocation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:drawablePadding="8dp"
+                    android:gravity="center_vertical"
+                    android:textColor="@color/ink"
+                    android:textSize="14.5sp"
+                    app:drawableStartCompat="@drawable/ic_pin" />
+
+                <LinearLayout
+                    android:id="@+id/actionsRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:orientation="horizontal" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="20dp"
+                    android:background="#EDEEF0" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:text="About"
+                    android:textColor="@color/ink"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/detailAbout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="3dp"
+                    android:textColor="@color/ink_muted"
+                    android:textSize="14.5sp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="20dp"
+                    android:background="#EDEEF0" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Reviews"
+                        android:textColor="@color/ink"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/writeReviewBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackground"
+                        android:padding="4dp"
+                        android:text="Write a review"
+                        android:textColor="@color/ink"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/detailReviews"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="vertical" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="16dp"
+                    android:background="#EDEEF0" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:text="Photos"
+                    android:textColor="@color/ink"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/detailPhotos"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:background="@drawable/thumb_bg"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Own this business?"
+                        android:textColor="@color/ink"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Claim your listing to reply to reviews, add photos and promote to the top of search."
+                        android:textColor="@color/ink_muted"
+                        android:textSize="13.5sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/claimBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="12dp"
+                        android:backgroundTint="@color/ink"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="Claim &amp; Promote"
+                        android:textAllCaps="false"
+                        android:textColor="@color/paper"
+                        app:cornerRadius="22dp" />
+                </LinearLayout>
+            </LinearLayout>
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+        <!-- Fixed top bar: back always pinned; title + white bg fade in on scroll -->
+        <LinearLayout
+            android:id="@+id/detailTopBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:background="@android:color/transparent"
+            android:gravity="center_vertical"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:paddingHorizontal="6dp">
+
+            <ImageButton
+                android:id="@+id/detailBack"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:src="@drawable/ic_back"
+                app:tint="@color/ink" />
+
+            <TextView
+                android:id="@+id/detailTopTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:alpha="0"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/ink"
+                android:textSize="19sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- ===== Bottom navigation ===== -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/paper"
+        app:elevation="10dp"
+        app:itemActiveIndicatorStyle="@null"
+        app:itemIconTint="@color/bottomnav_tint"
+        app:itemTextColor="@color/bottomnav_tint"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

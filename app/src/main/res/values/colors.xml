@@ -1,0 +1,28 @@
+<resources>
+    <!-- Text -->
+    <color name="ink">#202124</color>        <!-- primary text -->
+    <color name="ink_muted">#5F6368</color>  <!-- secondary text -->
+
+    <!-- Surfaces -->
+    <color name="paper">#FFFFFF</color>
+    <color name="surface_alt">#F1F3F4</color>
+
+    <!-- Grayscale only -->
+    <color name="brand">#202124</color>       <!-- primary (black) -->
+    <color name="brand_dark">#000000</color>
+    <color name="go">#202124</color>          <!-- start navigation -->
+    <color name="danger">#202124</color>      <!-- end (kept monochrome) -->
+
+    <!-- Map -->
+    <color name="route">#202124</color>
+    <color name="route_casing">#FFFFFF</color>
+    <color name="origin">#FFFFFF</color>
+    <color name="dest">#202124</color>
+
+    <!-- Legacy names still referenced in layout/code -->
+    <color name="accent">#202124</color>
+    <color name="teal">#202124</color>
+    <color name="mustard">#5F6368</color>
+
+    <color name="ic_launcher_background">#202124</color>
+</resources>
