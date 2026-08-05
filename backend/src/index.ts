@@ -132,6 +132,19 @@ app.get("/places/:id", async (c) => {
   return c.json({ ...toPlace(row), phone: row.phone });
 });
 
+/** Published community reviews for a place, newest first (COD-260). */
+app.get("/places/:id/reviews", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id, r.rating, r.body, r.created_at AS createdAt, u.name AS author, u.avatar_url AS avatarUrl
+     FROM reviews r JOIN users u ON u.id = r.user_id
+     WHERE r.place_id = ? AND r.status = 'published'
+     ORDER BY r.created_at DESC`
+  )
+    .bind(c.req.param("id"))
+    .all();
+  return c.json({ count: results.length, reviews: results });
+});
+
 app.get("/landmarks", async (c) => {
   const { results } = await c.env.DB.prepare(
     "SELECT id, name, kind, lat, lng FROM landmarks ORDER BY name"

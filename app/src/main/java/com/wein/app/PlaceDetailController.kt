@@ -56,17 +56,22 @@ internal class PlaceDetailController(
         binding.placeDetailScreen.visibility = View.VISIBLE
         binding.bottomNav.visibility = View.GONE
 
-        // Then refresh with the authoritative detail from the backend (phone now; hours/photos later).
+        // Then refresh from the backend: authoritative detail (phone) + real community reviews.
         if (p.id.isNotBlank()) {
             activity.lifecycleScope.launch {
                 val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(p.id) }.getOrNull() }
+                val reviews = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchReviews(p.id) }.getOrNull() }.orEmpty()
                 // Ignore if the user has since opened a different place.
-                if (full != null && currentPlace?.id == p.id) {
-                    currentPlace = full
-                    bind(full)
-                }
+                if (currentPlace?.id != p.id) return@launch
+                if (full != null) { currentPlace = full; bind(full) }
+                if (reviews.isNotEmpty()) renderReviews(reviews.map { Rev(it.author, it.rating, it.body) })
             }
         }
+    }
+
+    private fun renderReviews(reviews: List<Rev>) {
+        binding.detailReviews.removeAllViews()
+        reviews.forEach { binding.detailReviews.addView(reviewView(it)) }
     }
 
     fun hide() {
@@ -111,12 +116,9 @@ internal class PlaceDetailController(
         binding.actionsRow.addView(actionItem(R.drawable.ic_bookmark, "Save", false) { toast("Saved to your places") })
         binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
 
-        // Reviews
-        binding.detailReviews.removeAllViews()
+        // Reviews — sample for now; show() swaps in real backend reviews when available.
         val start = Math.abs(p.name.hashCode()) % reviewPool.size
-        (0 until 3).forEach { i ->
-            binding.detailReviews.addView(reviewView(reviewPool[(start + i) % reviewPool.size]))
-        }
+        renderReviews((0 until 3).map { reviewPool[(start + it) % reviewPool.size] })
 
         // Photos (placeholders)
         binding.detailPhotos.removeAllViews()

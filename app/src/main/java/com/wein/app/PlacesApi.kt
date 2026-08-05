@@ -5,6 +5,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+/** A community review from GET /places/:id/reviews. */
+data class Review(val author: String, val rating: Int, val body: String)
+
 /**
  * Thin client for the Wein backend directory API (GET /places).
  *
@@ -38,6 +41,24 @@ object PlacesApi {
     fun fetchPlace(id: String): Place? {
         val body = get("/places/" + URLEncoder.encode(id, "UTF-8")) ?: return null
         return placeFromJson(JSONObject(body))
+    }
+
+    /** Published reviews for a place (GET /places/:id/reviews), newest first. */
+    fun fetchReviews(placeId: String): List<Review> {
+        val body = get("/places/" + URLEncoder.encode(placeId, "UTF-8") + "/reviews") ?: return emptyList()
+        val arr = JSONObject(body).optJSONArray("reviews") ?: return emptyList()
+        val out = ArrayList<Review>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            out.add(
+                Review(
+                    author = o.optString("author", ""),
+                    rating = o.optInt("rating", 0),
+                    body = o.optString("body", ""),
+                )
+            )
+        }
+        return out
     }
 
     /** GET a path; returns the response body on 2xx, else null. */
