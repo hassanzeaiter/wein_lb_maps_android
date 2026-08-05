@@ -41,6 +41,9 @@ data class Place(
     val lng: Double,
     val promoted: Boolean = false,
     val openNow: Boolean = true,
+    // Populated from the backend; blank/null for the bundled seed entries.
+    val id: String = "",
+    val phone: String? = null,
 ) {
     val latLng: LatLng get() = LatLng(lat, lng)
     val priceText: String get() = if (price <= 0) "" else "$".repeat(price)

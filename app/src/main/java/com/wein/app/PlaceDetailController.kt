@@ -1,14 +1,20 @@
 package com.wein.app
 
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.lifecycle.lifecycleScope
 import com.wein.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The place-detail screen: parallax header, rating/price/open status, landmark location,
@@ -42,13 +48,25 @@ internal class PlaceDetailController(
 
     fun show(p: Place) {
         currentPlace = p
-        bind(p)
+        bind(p)                       // instant: what we already have from the list
         binding.detailScroll.scrollTo(0, 0)
         binding.detailTopBar.setBackgroundColor(Color.TRANSPARENT)
         binding.detailTopTitle.alpha = 0f
         binding.detailHeader.translationY = 0f
         binding.placeDetailScreen.visibility = View.VISIBLE
         binding.bottomNav.visibility = View.GONE
+
+        // Then refresh with the authoritative detail from the backend (phone now; hours/photos later).
+        if (p.id.isNotBlank()) {
+            activity.lifecycleScope.launch {
+                val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(p.id) }.getOrNull() }
+                // Ignore if the user has since opened a different place.
+                if (full != null && currentPlace?.id == p.id) {
+                    currentPlace = full
+                    bind(full)
+                }
+            }
+        }
     }
 
     fun hide() {
@@ -85,7 +103,11 @@ internal class PlaceDetailController(
         // Actions
         binding.actionsRow.removeAllViews()
         binding.actionsRow.addView(actionItem(R.drawable.ic_nav, "Directions", true) { directionsToCurrentPlace() })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) { toast("Call — coming soon") })
+        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) {
+            val phone = p.phone
+            if (phone.isNullOrBlank()) toast("No phone number yet")
+            else activity.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
+        })
         binding.actionsRow.addView(actionItem(R.drawable.ic_bookmark, "Save", false) { toast("Saved to your places") })
         binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
 

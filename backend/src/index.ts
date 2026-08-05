@@ -17,6 +17,7 @@ interface PlaceRow {
   open_now: number;
   rating: number;
   reviews_count: number;
+  phone: string | null;
 }
 
 /** Shape the app consumes (mirrors the Kotlin `Place`). */
@@ -97,7 +98,7 @@ app.get("/places", async (c) => {
   }
 
   const sql =
-    "SELECT id, name, category, price, area, landmark_cue, lat, lng, promoted, open_now, rating, reviews_count FROM places" +
+    "SELECT id, name, category, price, area, landmark_cue, lat, lng, promoted, open_now, rating, reviews_count, phone FROM places" +
     (where.length ? " WHERE " + where.join(" AND ") : "") +
     (geo ? "" : " ORDER BY promoted DESC, rating DESC") +
     " LIMIT ?";
@@ -122,12 +123,13 @@ app.get("/places", async (c) => {
 
 app.get("/places/:id", async (c) => {
   const row = await c.env.DB.prepare(
-    "SELECT id, name, category, price, area, landmark_cue, lat, lng, promoted, open_now, rating, reviews_count FROM places WHERE id = ?"
+    "SELECT id, name, category, price, area, landmark_cue, lat, lng, promoted, open_now, rating, reviews_count, phone FROM places WHERE id = ?"
   )
     .bind(c.req.param("id"))
     .first<PlaceRow>();
   if (!row) return c.json({ error: "not_found" }, 404);
-  return c.json(toPlace(row));
+  // Detail carries the richer fields the list omits (phone now; hours/photos later).
+  return c.json({ ...toPlace(row), phone: row.phone });
 });
 
 app.get("/landmarks", async (c) => {
