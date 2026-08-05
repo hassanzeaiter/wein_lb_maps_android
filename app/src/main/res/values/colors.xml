@@ -2,6 +2,8 @@
     <!-- Text -->
     <color name="ink">#202124</color>        <!-- primary text -->
     <color name="ink_muted">#5F6368</color>  <!-- secondary text -->
+    <color name="ink_soft">#3C4043</color>   <!-- icon/glyph tint -->
+    <color name="hairline">#EDEEF0</color>   <!-- list dividers -->
 
     <!-- Surfaces -->
     <color name="paper">#FFFFFF</color>

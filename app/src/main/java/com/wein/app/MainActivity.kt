@@ -25,7 +25,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -45,29 +44,7 @@ import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlin.math.asin
-import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.math.sqrt
-
-/** Travel modes. Drive/Walk hit real OSRM profiles; Transit is a car-based stand-in
- *  (real transit routing needs a GTFS feed, which is future work). */
-private enum class TravelMode(
-    val label: String,
-    val endpoint: String,
-    val mps: Double,        // simulated travel speed (metres/second) — keeps turns evenly paced
-    val camZoom: Double,
-    val suffix: String,
-) {
-    DRIVE("Drive", "https://routing.openstreetmap.de/routed-car/route/v1/driving/", 8.0, 17.0, "by car"),
-    WALK("Walk", "https://routing.openstreetmap.de/routed-foot/route/v1/foot/", 1.4, 18.0, "on foot"),
-    // Taxi rides on the same car network; the difference is the fare + request flow.
-    TAXI("Taxi", "https://routing.openstreetmap.de/routed-car/route/v1/driving/", 8.0, 17.0, "by taxi"),
-}
 
 class MainActivity : AppCompatActivity() {
 
@@ -128,6 +105,9 @@ class MainActivity : AppCompatActivity() {
     private var navCamBrg = 0.0     // eased camera heading
     private var camPrimed = false   // first fix snaps; later fixes ease
     private var navProgress = 0.0   // furthest distance travelled along the route (monotonic)
+    private var offRouteFixes = 0   // consecutive fixes seen off the suggested route
+    private var rerouting = false   // a reroute fetch is in flight
+    private var lastRerouteMs = 0L  // throttles reroutes so we don't thrash
 
     // Route-logging: capture the suggestion + the real GPS track for later analysis.
     private val navTrack = ArrayList<org.json.JSONObject>()
@@ -183,6 +163,12 @@ class MainActivity : AppCompatActivity() {
         private const val ORIGIN_COLOR = "#FFFFFF"   // white "start" dot (black ring)
         private const val DEST_COLOR = "#202124"     // black destination dot
         private const val PIN_COLOR = "#3C4043"      // one dark-gray for all pins
+
+        // Off-route handling: how far off the suggested line counts as "off-route", and how
+        // many consecutive off-route fixes to tolerate before rebuilding the route from here.
+        private const val OFF_ROUTE_METERS = 60.0
+        private const val OFF_ROUTE_FIXES_BEFORE_REROUTE = 5
+        private const val REROUTE_COOLDOWN_MS = 12_000L
     }
 
     /** Landmark category → glyph (all pins share one dark-gray colour; the glyph differentiates). */
@@ -642,7 +628,21 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Explore (places directory) --------------------------------------
 
+    private val placesAdapter by lazy { PlacesAdapter { openPlace(it) } }
+
     private fun setupExplore() {
+        binding.placesList.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        binding.placesList.adapter = placesAdapter
+        binding.placesList.addItemDecoration(
+            com.google.android.material.divider.MaterialDividerItemDecoration(
+                this, com.google.android.material.divider.MaterialDividerItemDecoration.VERTICAL
+            ).apply {
+                dividerColor = androidx.core.content.ContextCompat.getColor(this@MainActivity, R.color.hairline)
+                dividerThickness = dp(1)
+                dividerInsetStart = dp(92)
+                isLastItemDecorated = false
+            }
+        )
         renderChips()
         renderPlaces()
         binding.exploreSearch.addTextChangedListener(object : TextWatcher {
@@ -831,83 +831,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.resultsCount.text =
             if (list.size == 1) "1 place" else "${list.size} places"
-        val container = binding.placesList
-        container.removeAllViews()
-        list.forEachIndexed { i, p ->
-            if (i > 0) container.addView(placeDivider())
-            container.addView(placeCard(p))
-        }
-    }
-
-    private fun placeCard(p: Place): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(13), dp(16), dp(13))
-            isClickable = true
-            background = themedRipple()
-        }
-        val thumb = ImageView(this).apply {
-            setImageResource(p.category.glyph)
-            imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#3C4043"))
-            background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
-            val pad = dp(15)
-            setPadding(pad, pad, pad, pad)
-            layoutParams = LinearLayout.LayoutParams(dp(62), dp(62))
-        }
-        val texts = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginStart = dp(14) }
-        }
-        val nameRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        nameRow.addView(TextView(this).apply {
-            text = p.name
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 16.5f
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        if (p.promoted) nameRow.addView(promotedTag())
-        texts.addView(nameRow)
-        texts.addView(TextView(this).apply {
-            text = "${"%.1f".format(p.rating)} ★   ${formatCount(p.reviews)}"
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 13.5f
-            setPadding(0, dp(3), 0, 0)
-        })
-        val meta = buildString {
-            append(p.category.label)
-            if (p.priceText.isNotEmpty()) append(" · ").append(p.priceText)
-            append(" · ").append(p.area)
-        }
-        texts.addView(TextView(this).apply {
-            text = meta
-            setTextColor(Color.parseColor("#5F6368"))
-            textSize = 13f
-            setPadding(0, dp(2), 0, 0)
-        })
-        card.addView(thumb)
-        card.addView(texts)
-        card.setOnClickListener { openPlace(p) }
-        return card
-    }
-
-    private fun promotedTag(): View = TextView(this).apply {
-        text = "Promoted"
-        textSize = 10f
-        setTypeface(typeface, Typeface.BOLD)
-        setTextColor(Color.parseColor("#5F6368"))
-        setPadding(dp(7), dp(2), dp(7), dp(2))
-        background = android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = dp(6).toFloat()
-            setColor(Color.parseColor("#F1F3F4"))
-        }
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { marginStart = dp(8) }
+        placesAdapter.submitList(list)
     }
 
     private fun placeDivider(): View = View(this).apply {
@@ -916,9 +840,6 @@ class MainActivity : AppCompatActivity() {
         }
         setBackgroundColor(Color.parseColor("#EDEEF0"))
     }
-
-    private fun formatCount(n: Int): String =
-        if (n >= 1000) "%.1fk".format(n / 1000.0).replace(".0k", "k") else n.toString()
 
     private fun openPlace(p: Place) = showPlaceDetail(p)
 
@@ -1517,6 +1438,8 @@ class MainActivity : AppCompatActivity() {
         navProgress = 0.0
         navPtr = 0
         announcedPtr = -1
+        offRouteFixes = 0
+        rerouting = false
         binding.recenterBtn.visibility = View.GONE
         binding.muteBtn.setIconResource(if (voiceOn) R.drawable.ic_volume_up else R.drawable.ic_volume_off)
         binding.navTurn.text = "Getting your route…"
@@ -1590,9 +1513,31 @@ class MainActivity : AppCompatActivity() {
         // Drop obviously useless fixes so the puck doesn't teleport on noise.
         if (location.hasAccuracy() && location.accuracy > 60f) return
         val snap = snapToRoute(navPath, navCum, raw)
-        // If the fix is nowhere near the route (wrong turn, big GPS error), keep the last
-        // good state instead of snapping to some far part of the line.
-        if (snap.offRoute > 60.0 && camPrimed) return
+        // Off the suggested route — the driver took a different road, or OSRM's line simply
+        // doesn't match the real road. The old code froze the puck here (it kept dropping every
+        // fix while the camera was following, so the cursor only moved when you tapped Re-center).
+        // Instead: keep the cursor LIVE on the real GPS position, and once we're clearly off the
+        // line, rebuild the route from here so guidance follows the road actually driven.
+        if (snap.offRoute > OFF_ROUTE_METERS) {
+            offRouteFixes++
+            if (location.hasBearing() && location.speed > 1.0) lastBrg = location.bearing.toDouble()
+            updatePuck(raw)
+            lastPuck = raw
+            if (followingUser) {
+                navCamBrg = if (!camPrimed) lastBrg else lerpAngle(navCamBrg, lastBrg, 0.35)
+                camPrimed = true
+                val aim = destinationPoint(raw.latitude, raw.longitude, navCamBrg, 45.0)
+                map?.animateCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(aim).zoom(currentMode.camZoom).tilt(58.0).bearing(navCamBrg).build()
+                    ), 950,
+                )
+            }
+            if (offRouteFixes >= OFF_ROUTE_FIXES_BEFORE_REROUTE) reroute(raw, dest)
+            return
+        }
+        offRouteFixes = 0
 
         // Progress only ever moves forward — a noisy fix can't drag us back or skip ahead
         // to a nearer part of the polyline. This is what stops the random anchor jumping.
@@ -1642,6 +1587,42 @@ class MainActivity : AppCompatActivity() {
         if (remaining <= 15.0 && crowFlies <= 40.0) {
             onArrived(dest)
             stopLocationTracking()
+        }
+    }
+
+    /**
+     * The driver has left the suggested route — fetch a fresh route from the live position to
+     * the destination and swap it in, so the puck, steps and voice follow the road actually
+     * taken. Throttled and single-flight so a persistent map/road mismatch retries calmly
+     * (every [REROUTE_COOLDOWN_MS]) instead of thrashing; the cursor stays live throughout.
+     */
+    private fun reroute(from: LatLng, dest: Landmark) {
+        if (rerouting) return
+        if (System.currentTimeMillis() - lastRerouteMs < REROUTE_COOLDOWN_MS) return
+        rerouting = true
+        lastRerouteMs = System.currentTimeMillis()
+        binding.navTurn.text = "Rerouting…"
+        speak("Rerouting.")
+        val mode = currentMode
+        val here = Landmark("Your location", "you", from.latitude, from.longitude)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { fetchRoute(here, dest, mode) }
+            rerouting = false
+            if (!navigating) return@launch
+            if (result == null || result.geometry.size < 2) return@launch  // keep old route; retry later
+            origin = here
+            setOriginMarker(here)
+            currentRoute = result
+            navPath = result.geometry
+            navCum = cumulative(navPath)
+            navTotal = navCum.last()
+            buildNavSteps(result, dest)
+            drawRoute(navPath)
+            navProgress = 0.0
+            navPtr = 0
+            announcedPtr = -1
+            offRouteFixes = 0
+            camPrimed = false        // re-lock the camera heading on the next fix
         }
     }
 
@@ -1867,18 +1848,6 @@ class MainActivity : AppCompatActivity() {
         map?.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
     }
 
-    /** Point [dist] metres from (lat,lng) along [bearingDeg] — used to aim ahead of the puck. */
-    private fun destinationPoint(lat: Double, lng: Double, bearingDeg: Double, dist: Double): LatLng {
-        val r = 6371000.0
-        val br = Math.toRadians(bearingDeg)
-        val lat1 = Math.toRadians(lat)
-        val lng1 = Math.toRadians(lng)
-        val dr = dist / r
-        val lat2 = asin(sin(lat1) * cos(dr) + cos(lat1) * sin(dr) * cos(br))
-        val lng2 = lng1 + atan2(sin(br) * sin(dr) * cos(lat1), cos(dr) - sin(lat1) * sin(lat2))
-        return LatLng(Math.toDegrees(lat2), Math.toDegrees(lng2))
-    }
-
     /**
      * Build a clean *landmark-only* itinerary — the way people here actually give
      * directions: only the well-known places, not every micro-turn or street name.
@@ -1976,90 +1945,6 @@ class MainActivity : AppCompatActivity() {
         map?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, dp(70)))
     }
 
-    // ---- OSRM ------------------------------------------------------------
-
-    private data class Maneuver(
-        val lat: Double, val lng: Double,
-        val type: String, val modifier: String, val name: String,
-    )
-
-    private data class RouteResult(
-        val geometry: List<Point>,
-        val distanceMeters: Double,
-        val durationSeconds: Double,
-        val steps: List<Maneuver>,
-    )
-
-    private fun fetchRoute(o: Landmark, d: Landmark, mode: TravelMode): RouteResult? {
-        return try {
-            val url = URL(
-                mode.endpoint +
-                    "${o.lng},${o.lat};${d.lng},${d.lat}" +
-                    "?overview=full&geometries=geojson&steps=true"
-            )
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 12000
-                readTimeout = 12000
-                requestMethod = "GET"
-                instanceFollowRedirects = true
-                // FOSSGIS' public OSRM rejects the default Dalvik user-agent.
-                setRequestProperty("User-Agent", "WeinDemo/0.1 (Lebanon landmark maps demo)")
-                setRequestProperty("Accept", "application/json")
-            }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            conn.disconnect()
-            android.util.Log.i("Wein", "OSRM HTTP $code, ${body.length} bytes")
-            parseRoute(body)
-        } catch (e: Exception) {
-            android.util.Log.e("Wein", "route fetch failed", e)
-            null
-        }
-    }
-
-    private fun parseRoute(body: String): RouteResult? {
-        val json = JSONObject(body)
-        val routes = json.optJSONArray("routes") ?: return null
-        if (routes.length() == 0) return null
-        val route = routes.getJSONObject(0)
-
-        val coords = route.getJSONObject("geometry").getJSONArray("coordinates")
-        val points = ArrayList<Point>(coords.length())
-        for (i in 0 until coords.length()) {
-            val c = coords.getJSONArray(i)
-            points.add(Point.fromLngLat(c.getDouble(0), c.getDouble(1)))
-        }
-
-        val maneuvers = ArrayList<Maneuver>()
-        val legs = route.optJSONArray("legs")
-        if (legs != null && legs.length() > 0) {
-            val steps = legs.getJSONObject(0).optJSONArray("steps")
-            if (steps != null) {
-                for (i in 0 until steps.length()) {
-                    val step = steps.getJSONObject(i)
-                    val man = step.getJSONObject("maneuver")
-                    val loc = man.getJSONArray("location")
-                    maneuvers.add(
-                        Maneuver(
-                            lat = loc.getDouble(1),
-                            lng = loc.getDouble(0),
-                            type = man.optString("type", ""),
-                            modifier = man.optString("modifier", ""),
-                            name = step.optString("name", ""),
-                        )
-                    )
-                }
-            }
-        }
-        return RouteResult(
-            geometry = points,
-            distanceMeters = route.optDouble("distance", 0.0),
-            durationSeconds = route.optDouble("duration", 0.0),
-            steps = maneuvers,
-        )
-    }
-
     // ---- Geo helpers -----------------------------------------------------
 
     /** If the tap actually landed on a place pin (or its label), return that place. */
@@ -2093,113 +1978,6 @@ class MainActivity : AppCompatActivity() {
         }
         return if (bestDist <= maxMeters) best else null
     }
-
-    private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val r = 6371000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = sin(dLat / 2) * sin(dLat / 2) +
-            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-            sin(dLon / 2) * sin(dLon / 2)
-        return r * 2 * atan2(sqrt(a), sqrt(1 - a))
-    }
-
-    /** Cumulative metre distance to each vertex of the route polyline. */
-    private fun cumulative(path: List<Point>): DoubleArray {
-        val c = DoubleArray(path.size)
-        for (i in 1 until path.size) {
-            c[i] = c[i - 1] + haversine(
-                path[i - 1].latitude(), path[i - 1].longitude(),
-                path[i].latitude(), path[i].longitude(),
-            )
-        }
-        return c
-    }
-
-    /** Distance along the route of the polyline vertex nearest to a maneuver point. */
-    private fun distAlong(path: List<Point>, cum: DoubleArray, lat: Double, lng: Double): Double {
-        var bestIdx = 0
-        var bestD = Double.MAX_VALUE
-        for (i in path.indices) {
-            val d = haversine(lat, lng, path[i].latitude(), path[i].longitude())
-            if (d < bestD) { bestD = d; bestIdx = i }
-        }
-        return cum[bestIdx]
-    }
-
-    private data class SnapResult(
-        val pos: LatLng, val distAlong: Double, val bearing: Double, val offRoute: Double,
-    )
-
-    /** Project a live GPS point onto the route: nearest point on the polyline, how far
-     *  along the route that is, the segment's travel bearing, and the off-route distance. */
-    private fun snapToRoute(path: List<Point>, cum: DoubleArray, p: LatLng): SnapResult {
-        var bestD = Double.MAX_VALUE
-        var bestPos = LatLng(path[0].latitude(), path[0].longitude())
-        var bestDist = 0.0
-        var bestBrg = bearingBetween(path[0], path[1])
-        for (i in 0 until path.size - 1) {
-            val a = path[i]; val b = path[i + 1]
-            val (proj, t) = projectOnSegment(p, a, b)
-            val d = haversine(p.latitude, p.longitude, proj.latitude, proj.longitude)
-            if (d < bestD) {
-                bestD = d
-                bestPos = proj
-                bestDist = cum[i] + (cum[i + 1] - cum[i]) * t
-                bestBrg = bearingBetween(a, b)
-            }
-        }
-        return SnapResult(bestPos, bestDist, bestBrg, bestD)
-    }
-
-    /** The point on the route at a given distance along it (used to place the puck at
-     *  our monotonic progress, so it never skips backwards on a jittery fix). */
-    private fun positionAt(path: List<Point>, cum: DoubleArray, dist: Double): LatLng {
-        if (dist <= 0.0) return LatLng(path[0].latitude(), path[0].longitude())
-        val total = cum.last()
-        if (dist >= total) return LatLng(path.last().latitude(), path.last().longitude())
-        var i = 0
-        while (i < cum.size - 1 && cum[i + 1] < dist) i++
-        val f = ((dist - cum[i]) / (cum[i + 1] - cum[i]).coerceAtLeast(1e-6)).coerceIn(0.0, 1.0)
-        val a = path[i]; val b = path[i + 1]
-        return LatLng(
-            a.latitude() + (b.latitude() - a.latitude()) * f,
-            a.longitude() + (b.longitude() - a.longitude()) * f,
-        )
-    }
-
-    /** Closest point on segment a→b to p (planar approx), plus the 0..1 position along it. */
-    private fun projectOnSegment(p: LatLng, a: Point, b: Point): Pair<LatLng, Double> {
-        val mPerDegLat = 111_320.0
-        val mPerDegLng = 111_320.0 * cos(Math.toRadians(a.latitude()))
-        val bx = (b.longitude() - a.longitude()) * mPerDegLng
-        val by = (b.latitude() - a.latitude()) * mPerDegLat
-        val px = (p.longitude - a.longitude()) * mPerDegLng
-        val py = (p.latitude - a.latitude()) * mPerDegLat
-        val len2 = bx * bx + by * by
-        val t = if (len2 <= 1e-9) 0.0 else ((px * bx + py * by) / len2).coerceIn(0.0, 1.0)
-        val lat = a.latitude() + (b.latitude() - a.latitude()) * t
-        val lng = a.longitude() + (b.longitude() - a.longitude()) * t
-        return LatLng(lat, lng) to t
-    }
-
-    private fun bearingBetween(a: Point, b: Point): Double {
-        val lat1 = Math.toRadians(a.latitude())
-        val lat2 = Math.toRadians(b.latitude())
-        val dLon = Math.toRadians(b.longitude() - a.longitude())
-        val y = sin(dLon) * cos(lat2)
-        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
-        return (Math.toDegrees(atan2(y, x)) + 360.0) % 360.0
-    }
-
-    /** Interpolate between two compass bearings along the shortest arc. */
-    private fun lerpAngle(from: Double, to: Double, t: Double): Double {
-        val diff = ((to - from + 540.0) % 360.0) - 180.0
-        return (from + diff * t + 360.0) % 360.0
-    }
-
-    private fun formatDist(m: Double): String =
-        if (m >= 1000) "%.1f km".format(m / 1000.0) else "${m.roundToInt()} m"
 
     private fun drawableToBitmap(d: android.graphics.drawable.Drawable, size: Int): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
