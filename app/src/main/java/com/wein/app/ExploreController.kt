@@ -10,9 +10,13 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.divider.MaterialDividerItemDecoration
 import com.wein.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The Explore home: category chip row, search box, and the promoted-first place list
@@ -30,6 +34,10 @@ internal class ExploreController(
     private var currentChip = 0   // selected category chip
     private val placesAdapter = PlacesAdapter { onOpenPlace(it) }
 
+    // The directory. Starts as the bundled seed (instant render + offline fallback), then is
+    // replaced by the backend's GET /places once it loads. Chip/text filtering runs over this.
+    private var directory: List<Place> = PLACES
+
     private fun dp(v: Int) = activity.dp(v)
 
     fun setup() {
@@ -44,7 +52,8 @@ internal class ExploreController(
             }
         )
         renderChips()
-        renderPlaces()
+        renderPlaces()   // instant: bundled seed
+        loadDirectory()  // then refresh from the backend
         binding.exploreSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {
@@ -58,6 +67,19 @@ internal class ExploreController(
             binding.exploreSearch.setText("")
             activity.hideKeyboard()
             renderPlaces()
+        }
+    }
+
+    /** Load the directory from the backend; keep the bundled seed on any failure. */
+    private fun loadDirectory() {
+        activity.lifecycleScope.launch {
+            val fetched = withContext(Dispatchers.IO) {
+                runCatching { PlacesApi.fetchPlaces() }.getOrNull()
+            }
+            if (!fetched.isNullOrEmpty()) {
+                directory = fetched
+                renderPlaces()
+            }
         }
     }
 
@@ -106,7 +128,7 @@ internal class ExploreController(
     private fun renderPlaces() {
         val chip = PLACE_CHIPS[currentChip]
         val q = binding.exploreSearch.text?.toString()?.trim().orEmpty()
-        var list = PLACES
+        var list = directory
         if (chip.cats != null) list = list.filter { it.category in chip.cats }
         if (q.isNotEmpty()) list = list.filter {
             it.name.contains(q, true) || it.category.label.contains(q, true) || it.area.contains(q, true)
