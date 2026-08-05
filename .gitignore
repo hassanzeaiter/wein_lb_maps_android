@@ -7,9 +7,5 @@
 .externalNativeBuild
 .cxx
 app/build/
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# IDE (IntelliJ / Android Studio) — per-developer, keep out of VCS
+/.idea/
