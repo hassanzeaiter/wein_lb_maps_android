@@ -1,6 +1,15 @@
 import { Hono } from "hono";
+import {
+  type AuthEnv,
+  bearer,
+  createSession,
+  hashPassword,
+  requireAuth,
+  sha256Hex,
+  verifyPassword,
+} from "./auth";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<AuthEnv>();
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -151,6 +160,49 @@ app.get("/landmarks", async (c) => {
   ).all();
   return c.json({ count: results.length, landmarks: results });
 });
+
+// ---- auth (COD-254) --------------------------------------------------------
+
+app.post("/auth/signup", async (c) => {
+  const { email, name, password } = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  if (typeof email !== "string" || typeof name !== "string" || typeof password !== "string" ||
+      !email.includes("@") || name.trim().length < 1 || password.length < 6) {
+    return c.json({ error: "invalid_input" }, 400);
+  }
+  const existing = await c.env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+  if (existing) return c.json({ error: "email_taken" }, 409);
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare("INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)")
+    .bind(id, email, name.trim(), await hashPassword(password))
+    .run();
+  const token = await createSession(c.env.DB, id);
+  return c.json({ token, user: { id, email, name: name.trim(), role: "user" } }, 201);
+});
+
+app.post("/auth/login", async (c) => {
+  const { email, password } = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  if (typeof email !== "string" || typeof password !== "string") {
+    return c.json({ error: "invalid_input" }, 400);
+  }
+  const u = await c.env.DB.prepare(
+    "SELECT id, email, name, role, password_hash FROM users WHERE email = ?"
+  )
+    .bind(email)
+    .first<{ id: string; email: string; name: string; role: string; password_hash: string | null }>();
+  if (!u || !u.password_hash || !(await verifyPassword(password, u.password_hash))) {
+    return c.json({ error: "invalid_credentials" }, 401);
+  }
+  const token = await createSession(c.env.DB, u.id);
+  return c.json({ token, user: { id: u.id, email: u.email, name: u.name, role: u.role } });
+});
+
+app.post("/auth/logout", requireAuth, async (c) => {
+  const token = bearer(c);
+  if (token) await c.env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256Hex(token)).run();
+  return c.json({ ok: true });
+});
+
+app.get("/me", requireAuth, (c) => c.json({ user: c.get("user") }));
 
 app.onError((err, c) => {
   console.log(JSON.stringify({ level: "error", msg: "unhandled", error: String(err), path: c.req.path }));

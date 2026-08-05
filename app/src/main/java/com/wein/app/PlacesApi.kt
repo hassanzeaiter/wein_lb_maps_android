@@ -17,14 +17,6 @@ data class Review(val author: String, val rating: Int, val body: String)
  */
 object PlacesApi {
 
-    /**
-     * Base URL of the backend.
-     * - `10.0.2.2` is the Android emulator's alias for the host machine's localhost, so this
-     *   reaches a local `wrangler dev` on :8787.
-     * - For a real device, point this at the deployed Worker URL.
-     */
-    private const val BASE_URL = "http://10.0.2.2:8787"
-
     fun fetchPlaces(query: String = "", category: String? = null): List<Place> {
         val params = buildList {
             if (query.isNotBlank()) add("q=" + URLEncoder.encode(query, "UTF-8"))
@@ -63,7 +55,7 @@ object PlacesApi {
 
     /** GET a path; returns the response body on 2xx, else null. */
     private fun get(path: String): String? {
-        val conn = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
+        val conn = (URL("$API_BASE_URL$path").openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000
             readTimeout = 8000
             requestMethod = "GET"

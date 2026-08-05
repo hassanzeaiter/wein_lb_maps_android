@@ -68,6 +68,9 @@ class MainActivity : AppCompatActivity() {
     // Explore home (chips + search + place list) — self-contained; see ExploreController.
     private val explore by lazy { ExploreController(this, binding) { placeDetail.show(it) } }
 
+    // Sign in / sign up + Profile header — self-contained; see AuthController.
+    private val auth by lazy { AuthController(this, binding) }
+
     internal lateinit var sheet: BottomSheetBehavior<*>
     private var didAutoLocate = false
 
@@ -141,6 +144,7 @@ class MainActivity : AppCompatActivity() {
         MapLibre.getInstance(this)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        Session.load(this)
         applyEdgeInsets()
         sheet = BottomSheetBehavior.from(binding.directionsCard)
         sheet.state = BottomSheetBehavior.STATE_HIDDEN
@@ -609,7 +613,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupProfile() {
-        binding.signInBtn.setOnClickListener { toast("Sign-in — coming soon") }
+        binding.signInBtn.setOnClickListener { auth.onSignInClicked() }
+        auth.refreshProfileHeader()
         val rows = listOf(
             Triple(R.drawable.ic_list, "Saved places", "Your bookmarks"),
             Triple(R.drawable.ic_star, "My reviews", "Reviews you've written"),

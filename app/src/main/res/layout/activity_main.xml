@@ -638,6 +638,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/profileName"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Guest"
@@ -646,6 +647,7 @@
                     android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/profileSubtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Sign in to save places &amp; review"
