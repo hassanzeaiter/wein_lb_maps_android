@@ -589,12 +589,6 @@ internal class NavigationController(
         activity.geoSource(MainActivity.SRC_PUCK)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
     }
 
-    private fun followCamera(pos: LatLng, bearing: Double, zoom: Double, tilt: Double) {
-        val cam = CameraPosition.Builder()
-            .target(pos).zoom(zoom).tilt(tilt).bearing(bearing).build()
-        activity.map?.moveCamera(CameraUpdateFactory.newCameraPosition(cam))
-    }
-
     /**
      * Build a clean *landmark-only* itinerary — the way people here actually give
      * directions: only the well-known places, not every micro-turn or street name.
