@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wein-backend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wein",
+      // Local dev (`wrangler dev` / `--local`) ignores this; replace with the real id
+      // from `wrangler d1 create wein` before deploying (needs Cloudflare auth).
+      "database_id": "REPLACE_AFTER_d1_create",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
