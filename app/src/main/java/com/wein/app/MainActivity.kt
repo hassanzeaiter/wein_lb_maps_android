@@ -65,6 +65,9 @@ class MainActivity : AppCompatActivity() {
     // In-app taxi (ride-hailing) flow — self-contained; see TaxiController.
     private val taxi by lazy { TaxiController(this, binding) }
 
+    // Place-detail screen — self-contained; see PlaceDetailController.
+    private val placeDetail by lazy { PlaceDetailController(this, binding) }
+
     private lateinit var sheet: BottomSheetBehavior<*>
     private var currentChip = 0   // selected Explore category chip
     private var didAutoLocate = false
@@ -219,7 +222,7 @@ class MainActivity : AppCompatActivity() {
         binding.listFab.setOnClickListener { showExplore() }
         binding.closeSheetBtn.setOnClickListener { closeSheet() }
         binding.recenterBtn.setOnClickListener { recenter() }
-        binding.detailBack.setOnClickListener { hidePlaceDetail() }
+        binding.detailBack.setOnClickListener { placeDetail.hide() }
         binding.detailScroll.setOnScrollChangeListener(
             androidx.core.widget.NestedScrollView.OnScrollChangeListener { _, _, scrollY, _, _ ->
                 val a = (scrollY / dp(150).toFloat()).coerceIn(0f, 1f)
@@ -574,7 +577,7 @@ class MainActivity : AppCompatActivity() {
         setBackgroundColor(Color.parseColor("#EDEEF0"))
     }
 
-    private fun themedRipple(): android.graphics.drawable.Drawable? {
+    internal fun themedRipple(): android.graphics.drawable.Drawable? {
         val a = obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground))
         val d = a.getDrawable(0)
         a.recycle()
@@ -612,7 +615,7 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Explore (places directory) --------------------------------------
 
-    private val placesAdapter by lazy { PlacesAdapter { openPlace(it) } }
+    private val placesAdapter by lazy { PlacesAdapter { placeDetail.show(it) } }
 
     private fun setupExplore() {
         binding.placesList.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
@@ -675,7 +678,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The map is a sub-screen of Explore — full-screen, no bottom nav. */
-    private fun showMap() {
+    internal fun showMap() {
         binding.exploreScreen.visibility = View.GONE
         binding.contributeScreen.visibility = View.GONE
         binding.profileScreen.visibility = View.GONE
@@ -825,176 +828,6 @@ class MainActivity : AppCompatActivity() {
         setBackgroundColor(Color.parseColor("#EDEEF0"))
     }
 
-    private fun openPlace(p: Place) = showPlaceDetail(p)
-
-    // ---- Place detail ----------------------------------------------------
-
-    private var currentPlace: Place? = null
-
-    private data class Rev(val name: String, val stars: Int, val text: String)
-
-    private val reviewPool = listOf(
-        Rev("Rami K.", 5, "Great spot, exactly as described. Easy to find with the landmark directions."),
-        Rev("Nour A.", 4, "Good service and lovely atmosphere. A bit busy on weekends."),
-        Rev("Jad H.", 5, "One of my favourites in the area. Highly recommend."),
-        Rev("Maya S.", 4, "Solid choice — parking can be tricky though."),
-        Rev("Karim T.", 3, "Decent, but a little overpriced for what it is."),
-        Rev("Lynn M.", 5, "Staff were super friendly. Will definitely come back."),
-    )
-
-    private fun showPlaceDetail(p: Place) {
-        currentPlace = p
-        bindPlaceDetail(p)
-        binding.detailScroll.scrollTo(0, 0)
-        binding.detailTopBar.setBackgroundColor(Color.TRANSPARENT)
-        binding.detailTopTitle.alpha = 0f
-        binding.detailHeader.translationY = 0f
-        binding.placeDetailScreen.visibility = View.VISIBLE
-        binding.bottomNav.visibility = View.GONE
-    }
-
-    private fun hidePlaceDetail() {
-        binding.placeDetailScreen.visibility = View.GONE
-        binding.bottomNav.visibility = View.VISIBLE
-    }
-
-    private fun directionsToCurrentPlace() {
-        val p = currentPlace ?: return
-        binding.placeDetailScreen.visibility = View.GONE
-        showMap()
-        routeTo(Landmark(p.name, "place", p.lat, p.lng))
-    }
-
-    private fun bindPlaceDetail(p: Place) {
-        binding.detailHeaderIcon.setImageResource(p.category.glyph)
-        binding.detailName.text = p.name
-        binding.detailTopTitle.text = p.name
-        binding.detailPromoted.visibility = if (p.promoted) View.VISIBLE else View.GONE
-        binding.detailRating.text =
-            "${"%.1f".format(p.rating)} ★    %,d reviews".format(p.reviews)
-        binding.detailMeta.text = buildString {
-            append(p.category.label)
-            if (p.priceText.isNotEmpty()) append(" · ").append(p.priceText)
-            append(" · ").append(if (p.openNow) "Open now" else "Closed")
-        }
-        binding.detailLocation.text = "${p.landmark} · ${p.area}"
-        val cat = p.category.label.lowercase(java.util.Locale.US)
-        binding.detailAbout.text =
-            (if (p.openNow) "Currently open. " else "Currently closed. ") +
-            "${p.name} is a well-known $cat in ${p.area}. ${p.landmark} — " +
-            "the kind of spot locals point you to by landmark, not by address."
-
-        // Actions
-        binding.actionsRow.removeAllViews()
-        binding.actionsRow.addView(actionItem(R.drawable.ic_nav, "Directions", true) { directionsToCurrentPlace() })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) { toast("Call — coming soon") })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_bookmark, "Save", false) { toast("Saved to your places") })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
-
-        // Reviews
-        binding.detailReviews.removeAllViews()
-        val start = Math.abs(p.name.hashCode()) % reviewPool.size
-        (0 until 3).forEach { i ->
-            binding.detailReviews.addView(reviewView(reviewPool[(start + i) % reviewPool.size]))
-        }
-
-        // Photos (placeholders)
-        binding.detailPhotos.removeAllViews()
-        repeat(4) {
-            binding.detailPhotos.addView(ImageView(this).apply {
-                setImageResource(p.category.glyph)
-                alpha = 0.3f
-                imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#3C4043"))
-                background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
-                val pad = dp(22); setPadding(pad, pad, pad, pad)
-                layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(10) }
-            })
-        }
-    }
-
-    private fun actionItem(iconRes: Int, label: String, filled: Boolean, onClick: () -> Unit): View {
-        val item = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            isClickable = true
-            background = themedRipple()
-            setPadding(0, dp(6), 0, dp(6))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        item.addView(ImageView(this).apply {
-            setImageResource(iconRes)
-            imageTintList = android.content.res.ColorStateList.valueOf(
-                Color.parseColor(if (filled) "#FFFFFF" else "#202124")
-            )
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(Color.parseColor(if (filled) "#202124" else "#F1F3F4"))
-            }
-            val pad = dp(13); setPadding(pad, pad, pad, pad)
-            layoutParams = LinearLayout.LayoutParams(dp(50), dp(50))
-        })
-        item.addView(TextView(this).apply {
-            text = label
-            textSize = 12f
-            setTextColor(Color.parseColor("#5F6368"))
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(6), 0, 0)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        })
-        item.setOnClickListener { onClick() }
-        return item
-    }
-
-    private fun reviewView(r: Rev): View {
-        val block = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(12), 0, dp(4))
-        }
-        val head = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        head.addView(TextView(this).apply {
-            text = r.name.take(1)
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#FFFFFF"))
-            textSize = 15f
-            setTypeface(typeface, Typeface.BOLD)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(Color.parseColor("#3C4043"))
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
-        })
-        head.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginStart = dp(10) }
-            addView(TextView(this@MainActivity).apply {
-                text = r.name
-                setTextColor(Color.parseColor("#202124"))
-                textSize = 14.5f
-                setTypeface(typeface, Typeface.BOLD)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "★".repeat(r.stars) + "☆".repeat(5 - r.stars)
-                setTextColor(Color.parseColor("#202124"))
-                textSize = 12.5f
-            })
-        })
-        block.addView(head)
-        block.addView(TextView(this).apply {
-            text = r.text
-            setTextColor(Color.parseColor("#5F6368"))
-            textSize = 14f
-            setPadding(0, dp(6), 0, 0)
-            setLineSpacing(dp(2).toFloat(), 1f)
-        })
-        return block
-    }
-
     /** Dismiss the sheet entirely (X button): clear the selection, route and markers. */
     private fun closeSheet() {
         currentDest = null
@@ -1007,7 +840,7 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Routing ---------------------------------------------------------
 
-    private fun routeTo(dest: Landmark) {
+    internal fun routeTo(dest: Landmark) {
         if (dest.name == origin.name) {
             toast("That's already your start point — long-press another pin to change it.")
             return
@@ -1779,8 +1612,8 @@ class MainActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (binding.placeDetailScreen.visibility == View.VISIBLE) {
-            hidePlaceDetail()
+        if (placeDetail.isVisible()) {
+            placeDetail.hide()
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()

@@ -1,0 +1,195 @@
+package com.wein.app
+
+import android.graphics.Color
+import android.graphics.Typeface
+import android.view.Gravity
+import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.appcompat.content.res.AppCompatResources
+import com.wein.app.databinding.ActivityMainBinding
+
+/**
+ * The place-detail screen: parallax header, rating/price/open status, landmark location,
+ * the Directions/Call/Save/Share actions, About, reviews and the photo strip.
+ *
+ * Owns the currently-shown place and renders into the `detail*` views in [binding]. Calls back
+ * to the [activity] only for shared helpers (dp/toast/themedRipple) and to leave for the map
+ * (showMap + routeTo) when the user taps Directions. Extracted from MainActivity (Wave 2).
+ */
+internal class PlaceDetailController(
+    private val activity: MainActivity,
+    private val binding: ActivityMainBinding,
+) {
+    private var currentPlace: Place? = null
+
+    private data class Rev(val name: String, val stars: Int, val text: String)
+
+    private val reviewPool = listOf(
+        Rev("Rami K.", 5, "Great spot, exactly as described. Easy to find with the landmark directions."),
+        Rev("Nour A.", 4, "Good service and lovely atmosphere. A bit busy on weekends."),
+        Rev("Jad H.", 5, "One of my favourites in the area. Highly recommend."),
+        Rev("Maya S.", 4, "Solid choice — parking can be tricky though."),
+        Rev("Karim T.", 3, "Decent, but a little overpriced for what it is."),
+        Rev("Lynn M.", 5, "Staff were super friendly. Will definitely come back."),
+    )
+
+    private fun dp(v: Int) = activity.dp(v)
+    private fun toast(msg: String) = activity.toast(msg)
+
+    fun isVisible(): Boolean = binding.placeDetailScreen.visibility == View.VISIBLE
+
+    fun show(p: Place) {
+        currentPlace = p
+        bind(p)
+        binding.detailScroll.scrollTo(0, 0)
+        binding.detailTopBar.setBackgroundColor(Color.TRANSPARENT)
+        binding.detailTopTitle.alpha = 0f
+        binding.detailHeader.translationY = 0f
+        binding.placeDetailScreen.visibility = View.VISIBLE
+        binding.bottomNav.visibility = View.GONE
+    }
+
+    fun hide() {
+        binding.placeDetailScreen.visibility = View.GONE
+        binding.bottomNav.visibility = View.VISIBLE
+    }
+
+    private fun directionsToCurrentPlace() {
+        val p = currentPlace ?: return
+        binding.placeDetailScreen.visibility = View.GONE
+        activity.showMap()
+        activity.routeTo(Landmark(p.name, "place", p.lat, p.lng))
+    }
+
+    private fun bind(p: Place) {
+        binding.detailHeaderIcon.setImageResource(p.category.glyph)
+        binding.detailName.text = p.name
+        binding.detailTopTitle.text = p.name
+        binding.detailPromoted.visibility = if (p.promoted) View.VISIBLE else View.GONE
+        binding.detailRating.text =
+            "${"%.1f".format(p.rating)} ★    %,d reviews".format(p.reviews)
+        binding.detailMeta.text = buildString {
+            append(p.category.label)
+            if (p.priceText.isNotEmpty()) append(" · ").append(p.priceText)
+            append(" · ").append(if (p.openNow) "Open now" else "Closed")
+        }
+        binding.detailLocation.text = "${p.landmark} · ${p.area}"
+        val cat = p.category.label.lowercase(java.util.Locale.US)
+        binding.detailAbout.text =
+            (if (p.openNow) "Currently open. " else "Currently closed. ") +
+            "${p.name} is a well-known $cat in ${p.area}. ${p.landmark} — " +
+            "the kind of spot locals point you to by landmark, not by address."
+
+        // Actions
+        binding.actionsRow.removeAllViews()
+        binding.actionsRow.addView(actionItem(R.drawable.ic_nav, "Directions", true) { directionsToCurrentPlace() })
+        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) { toast("Call — coming soon") })
+        binding.actionsRow.addView(actionItem(R.drawable.ic_bookmark, "Save", false) { toast("Saved to your places") })
+        binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
+
+        // Reviews
+        binding.detailReviews.removeAllViews()
+        val start = Math.abs(p.name.hashCode()) % reviewPool.size
+        (0 until 3).forEach { i ->
+            binding.detailReviews.addView(reviewView(reviewPool[(start + i) % reviewPool.size]))
+        }
+
+        // Photos (placeholders)
+        binding.detailPhotos.removeAllViews()
+        repeat(4) {
+            binding.detailPhotos.addView(ImageView(activity).apply {
+                setImageResource(p.category.glyph)
+                alpha = 0.3f
+                imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#3C4043"))
+                background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
+                val pad = dp(22); setPadding(pad, pad, pad, pad)
+                layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(10) }
+            })
+        }
+    }
+
+    private fun actionItem(iconRes: Int, label: String, filled: Boolean, onClick: () -> Unit): View {
+        val item = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            background = activity.themedRipple()
+            setPadding(0, dp(6), 0, dp(6))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        item.addView(ImageView(activity).apply {
+            setImageResource(iconRes)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                Color.parseColor(if (filled) "#FFFFFF" else "#202124")
+            )
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor(if (filled) "#202124" else "#F1F3F4"))
+            }
+            val pad = dp(13); setPadding(pad, pad, pad, pad)
+            layoutParams = LinearLayout.LayoutParams(dp(50), dp(50))
+        })
+        item.addView(TextView(activity).apply {
+            text = label
+            textSize = 12f
+            setTextColor(Color.parseColor("#5F6368"))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(6), 0, 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        })
+        item.setOnClickListener { onClick() }
+        return item
+    }
+
+    private fun reviewView(r: Rev): View {
+        val block = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        val head = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(TextView(activity).apply {
+            text = r.name.take(1)
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#FFFFFF"))
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#3C4043"))
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
+        })
+        head.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginStart = dp(10) }
+            addView(TextView(activity).apply {
+                text = r.name
+                setTextColor(Color.parseColor("#202124"))
+                textSize = 14.5f
+                setTypeface(typeface, Typeface.BOLD)
+            })
+            addView(TextView(activity).apply {
+                text = "★".repeat(r.stars) + "☆".repeat(5 - r.stars)
+                setTextColor(Color.parseColor("#202124"))
+                textSize = 12.5f
+            })
+        })
+        block.addView(head)
+        block.addView(TextView(activity).apply {
+            text = r.text
+            setTextColor(Color.parseColor("#5F6368"))
+            textSize = 14f
+            setPadding(0, dp(6), 0, 0)
+            setLineSpacing(dp(2).toFloat(), 1f)
+        })
+        return block
+    }
+}
