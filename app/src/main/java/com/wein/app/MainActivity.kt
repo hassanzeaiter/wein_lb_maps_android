@@ -21,8 +21,6 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.snackbar.Snackbar
 import com.wein.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
@@ -64,34 +62,8 @@ class MainActivity : AppCompatActivity() {
     private var navPtr = 0        // index of the next maneuver to reach
     private var announcedPtr = -1 // index of the maneuver we've already spoken
 
-    // Taxi (in-app ride-hailing) state
-    private var taxiTierIndex = 0
-    private var taxiRequested = false
-    private var taxiJob: Job? = null
-
-    private data class TaxiTier(
-        val name: String, val blurb: String, val seats: Int,
-        val base: Double, val perKm: Double, val perMin: Double, val minFare: Double,
-    )
-
-    // Fares in USD (Lebanon's economy is dollarized). Tuned to feel realistic for Beirut.
-    private val taxiTiers = listOf(
-        TaxiTier("Economy", "Affordable everyday rides", 4, 1.50, 0.50, 0.08, 3.0),
-        TaxiTier("Comfort", "Newer cars, more legroom", 4, 2.50, 0.70, 0.10, 4.5),
-        TaxiTier("Van XL", "Extra seats for groups", 6, 3.50, 0.90, 0.12, 6.0),
-    )
-
-    private data class Driver(
-        val name: String, val car: String, val color: String, val plate: String, val rating: Double,
-    )
-
-    private val driverPool = listOf(
-        Driver("Ziad", "Kia Rio", "White", "B 234 561", 4.9),
-        Driver("Rami", "Toyota Corolla", "Silver", "G 118 902", 4.8),
-        Driver("Antoine", "Hyundai Accent", "Grey", "J 447 330", 4.9),
-        Driver("Khaled", "Nissan Sunny", "Black", "M 903 214", 4.7),
-        Driver("Elie", "Kia Cerato", "White", "N 655 118", 5.0),
-    )
+    // In-app taxi (ride-hailing) flow — self-contained; see TaxiController.
+    private val taxi by lazy { TaxiController(this, binding) }
 
     private lateinit var sheet: BottomSheetBehavior<*>
     private var currentChip = 0   // selected Explore category chip
@@ -1026,9 +998,7 @@ class MainActivity : AppCompatActivity() {
     /** Dismiss the sheet entirely (X button): clear the selection, route and markers. */
     private fun closeSheet() {
         currentDest = null
-        taxiJob?.cancel()
-        taxiRequested = false
-        binding.taxiPanel.visibility = View.GONE
+        taxi.reset()
         sheet.isHideable = true
         sheet.state = BottomSheetBehavior.STATE_HIDDEN
         geoSource(SRC_ROUTE)?.setGeoJson(FeatureCollection.fromFeatures(emptyList()))
@@ -1067,9 +1037,7 @@ class MainActivity : AppCompatActivity() {
         binding.routeMeta.text = "Finding the way…"
         binding.stepsContainer.removeAllViews()
         binding.startNavBtn.visibility = View.GONE
-        binding.taxiPanel.visibility = View.GONE
-        taxiJob?.cancel()
-        taxiRequested = false
+        taxi.reset()
 
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) { fetchRoute(o, dest, mode) }
@@ -1090,7 +1058,7 @@ class MainActivity : AppCompatActivity() {
                 binding.stepsContainer.visibility = View.GONE
                 binding.startNavBtn.visibility = View.GONE
                 binding.taxiPanel.visibility = View.VISIBLE
-                renderTaxi(dest, result)
+                taxi.render(dest, result)
                 sheet.state = BottomSheetBehavior.STATE_EXPANDED
             } else {
                 binding.taxiPanel.visibility = View.GONE
@@ -1115,299 +1083,6 @@ class MainActivity : AppCompatActivity() {
             btn.setTextColor(fg)
             btn.iconTint = android.content.res.ColorStateList.valueOf(fg)
         }
-    }
-
-    // ---- Taxi (in-app ride-hailing) --------------------------------------
-
-    /** Upfront fare estimate: base + distance + time, floored at the tier minimum. */
-    private fun fareFor(tier: TaxiTier, meters: Double, seconds: Double): Double {
-        val f = tier.base + tier.perKm * (meters / 1000.0) + tier.perMin * (seconds / 60.0)
-        return maxOf(f, tier.minFare)
-    }
-
-    /** A believable, stable pickup ETA (minutes) — varies by tier and destination. */
-    private fun pickupEta(tier: TaxiTier, dest: Landmark): Int {
-        val h = Math.abs(dest.name.hashCode())
-        return when (tier.name) {
-            "Economy" -> 2 + h % 4
-            "Comfort" -> 3 + h % 4
-            else -> 5 + h % 5
-        }
-    }
-
-    /** Ride-picker state: the list of tiers with fares, and a Request button. */
-    private fun renderTaxi(dest: Landmark, result: RouteResult) {
-        val panel = binding.taxiPanel
-        panel.removeAllViews()
-        panel.addView(taxiLabel("CHOOSE A RIDE"))
-        taxiTiers.forEachIndexed { i, t ->
-            panel.addView(taxiTierRow(i, t, dest, result))
-        }
-        val tier = taxiTiers[taxiTierIndex]
-        panel.addView(taxiPrimaryButton("Request ${tier.name}") { requestTaxi(dest, result) })
-        panel.addView(TextView(this).apply {
-            text = "Fares are estimates in USD · driver assigned on request"
-            setTextColor(Color.parseColor("#9AA0A6"))
-            textSize = 11.5f
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(10) }
-        })
-    }
-
-    private fun taxiTierRow(index: Int, tier: TaxiTier, dest: Landmark, result: RouteResult): View {
-        val selected = index == taxiTierIndex
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(12), dp(14), dp(12))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(14).toFloat()
-                setColor(Color.parseColor(if (selected) "#F1F3F4" else "#FFFFFF"))
-                setStroke(dp(if (selected) 2 else 1),
-                    Color.parseColor(if (selected) "#202124" else "#EDEEF0"))
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(8) }
-            isClickable = true
-        }
-        row.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_taxi)
-            imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#202124"))
-            background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
-            val p = dp(9); setPadding(p, p, p, p)
-            layoutParams = LinearLayout.LayoutParams(dp(46), dp(46)).apply { marginEnd = dp(12) }
-        })
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val nameRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        nameRow.addView(TextView(this).apply {
-            text = tier.name
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        nameRow.addView(TextView(this).apply {
-            text = "· ${pickupEta(tier, dest)} min away"
-            setTextColor(Color.parseColor("#1A73E8"))
-            textSize = 12.5f
-            setTypeface(typeface, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(6) }
-        })
-        col.addView(nameRow)
-        col.addView(TextView(this).apply {
-            text = "${tier.blurb} · ${tier.seats} seats"
-            setTextColor(Color.parseColor("#5F6368"))
-            textSize = 13f
-            setPadding(0, dp(2), 0, 0)
-        })
-        row.addView(col)
-        row.addView(TextView(this).apply {
-            text = "$" + "%.2f".format(fareFor(tier, result.distanceMeters, result.durationSeconds))
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 16.5f
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        row.setOnClickListener {
-            taxiTierIndex = index
-            renderTaxi(dest, result)
-        }
-        return row
-    }
-
-    /** Fired by "Request": simulate finding a nearby driver, then show the driver card. */
-    private fun requestTaxi(dest: Landmark, result: RouteResult) {
-        taxiRequested = true
-        val tier = taxiTiers[taxiTierIndex]
-        renderTaxiFinding(tier, dest, result)
-        taxiJob?.cancel()
-        taxiJob = lifecycleScope.launch {
-            delay(2600)
-            renderTaxiDriver(tier, dest, result)
-        }
-    }
-
-    private fun renderTaxiFinding(tier: TaxiTier, dest: Landmark, result: RouteResult) {
-        val panel = binding.taxiPanel
-        panel.removeAllViews()
-        panel.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(18), 0, dp(10))
-            addView(android.widget.ProgressBar(this@MainActivity).apply {
-                isIndeterminate = true
-                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "Finding your ${tier.name} driver…"
-                setTextColor(Color.parseColor("#202124"))
-                textSize = 16.5f
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, dp(14), 0, 0)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "Contacting nearby drivers"
-                setTextColor(Color.parseColor("#5F6368"))
-                textSize = 13.5f
-                setPadding(0, dp(3), 0, 0)
-            })
-        })
-        panel.addView(taxiOutlineButton("Cancel request") { cancelTaxi(dest, result) })
-    }
-
-    private fun renderTaxiDriver(tier: TaxiTier, dest: Landmark, result: RouteResult) {
-        val driver = driverPool[Math.abs((dest.name + tier.name).hashCode()) % driverPool.size]
-        val eta = pickupEta(tier, dest)
-        val fare = fareFor(tier, result.distanceMeters, result.durationSeconds)
-        val panel = binding.taxiPanel
-        panel.removeAllViews()
-
-        panel.addView(TextView(this).apply {
-            text = "${driver.name} is on the way"
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 18f
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        panel.addView(TextView(this).apply {
-            text = "Arriving in $eta min · ${tier.name} · $" + "%.2f".format(fare)
-            setTextColor(Color.parseColor("#5F6368"))
-            textSize = 14f
-            setPadding(0, dp(3), 0, dp(2))
-        })
-
-        // Driver card: avatar + name/rating on the left, car + plate on the right.
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(14).toFloat()
-                setColor(Color.parseColor("#F1F3F4"))
-            }
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(12) }
-        }
-        card.addView(TextView(this).apply {
-            text = driver.name.take(1)
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#FFFFFF"))
-            textSize = 20f
-            setTypeface(typeface, Typeface.BOLD)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(Color.parseColor("#3C4043"))
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(12) }
-        })
-        card.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            addView(TextView(this@MainActivity).apply {
-                text = driver.name
-                setTextColor(Color.parseColor("#202124"))
-                textSize = 15.5f
-                setTypeface(typeface, Typeface.BOLD)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "★ ${"%.1f".format(driver.rating)} · ${driver.color} ${driver.car}"
-                setTextColor(Color.parseColor("#5F6368"))
-                textSize = 13f
-                setPadding(0, dp(2), 0, 0)
-            })
-        })
-        card.addView(TextView(this).apply {
-            text = driver.plate
-            setTextColor(Color.parseColor("#202124"))
-            textSize = 14f
-            setTypeface(android.graphics.Typeface.MONOSPACE, Typeface.BOLD)
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(6).toFloat()
-                setColor(Color.parseColor("#FFFFFF"))
-                setStroke(dp(1), Color.parseColor("#DADCE0"))
-            }
-        })
-        panel.addView(card)
-
-        // Actions: Call (outline) + Cancel ride (outline, red text).
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(12) }
-        }
-        actions.addView(taxiOutlineButton("Call ${driver.name}", weight = 1f, marginEnd = dp(8)) {
-            toast("Calling ${driver.name}…")
-        })
-        actions.addView(taxiOutlineButton("Cancel ride", weight = 1f, textColor = "#D93025") {
-            cancelTaxi(dest, result)
-        })
-        panel.addView(actions)
-    }
-
-    private fun cancelTaxi(dest: Landmark, result: RouteResult) {
-        taxiJob?.cancel()
-        taxiRequested = false
-        renderTaxi(dest, result)
-    }
-
-    private fun taxiLabel(text: String): View = TextView(this).apply {
-        this.text = text
-        setTextColor(Color.parseColor("#5F6368"))
-        textSize = 11f
-        setTypeface(typeface, Typeface.BOLD)
-        letterSpacing = 0.08f
-    }
-
-    private fun taxiPrimaryButton(label: String, onClick: () -> Unit): View = TextView(this).apply {
-        text = label
-        gravity = Gravity.CENTER
-        setTextColor(Color.parseColor("#FFFFFF"))
-        textSize = 16f
-        setTypeface(typeface, Typeface.BOLD)
-        background = android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = dp(16).toFloat()
-            setColor(Color.parseColor("#202124"))
-        }
-        layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(54)
-        ).apply { topMargin = dp(14) }
-        isClickable = true
-        setOnClickListener { onClick() }
-    }
-
-    private fun taxiOutlineButton(
-        label: String, weight: Float = 0f, marginEnd: Int = 0,
-        textColor: String = "#202124", onClick: () -> Unit,
-    ): View = TextView(this).apply {
-        text = label
-        gravity = Gravity.CENTER
-        setTextColor(Color.parseColor(textColor))
-        textSize = 15f
-        setTypeface(typeface, Typeface.BOLD)
-        background = android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = dp(14).toFloat()
-            setColor(Color.parseColor("#FFFFFF"))
-            setStroke(dp(1), Color.parseColor("#DADCE0"))
-        }
-        layoutParams =
-            if (weight > 0f)
-                LinearLayout.LayoutParams(0, dp(48), weight).apply { this.marginEnd = marginEnd }
-            else
-                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
-                    .apply { topMargin = dp(12) }
-        isClickable = true
-        setOnClickListener { onClick() }
     }
 
     // ---- Navigation mode -------------------------------------------------
@@ -2088,9 +1763,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    internal fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    private fun toast(msg: String) {
+    internal fun toast(msg: String) {
         Snackbar.make(binding.root, msg, Snackbar.LENGTH_SHORT).show()
     }
 
@@ -2124,7 +1799,7 @@ class MainActivity : AppCompatActivity() {
         // Don't kill navigation when the screen locks — keep GPS + guidance running while
         // navigating; only drop the transient locate listener when we're not navigating.
         if (!navigating) stopLocationTracking()
-        taxiJob?.cancel(); binding.mapView.onStop(); super.onStop()
+        taxi.cancelPending(); binding.mapView.onStop(); super.onStop()
     }
     override fun onLowMemory() { super.onLowMemory(); binding.mapView.onLowMemory() }
     override fun onDestroy() {
