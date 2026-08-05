@@ -154,6 +154,39 @@ app.get("/places/:id/reviews", async (c) => {
   return c.json({ count: results.length, reviews: results });
 });
 
+/** Post (or update) the signed-in user's review for a place (COD-259). */
+app.post("/places/:id/reviews", requireAuth, async (c) => {
+  const placeId = c.req.param("id");
+  const { rating, body } = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const r = Number(rating);
+  if (!Number.isInteger(r) || r < 1 || r > 5 || typeof body !== "string") {
+    return c.json({ error: "invalid_input" }, 400);
+  }
+  const place = await c.env.DB.prepare("SELECT id FROM places WHERE id = ?").bind(placeId).first();
+  if (!place) return c.json({ error: "not_found" }, 404);
+
+  const user = c.get("user");
+  // One review per user per place — insert, or update the existing one.
+  await c.env.DB.prepare(
+    `INSERT INTO reviews (id, place_id, user_id, rating, body) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(place_id, user_id) DO UPDATE SET rating = excluded.rating, body = excluded.body, updated_at = datetime('now')`
+  )
+    .bind(crypto.randomUUID(), placeId, user.id, r, body.trim())
+    .run();
+
+  // Recompute the denormalised place aggregate (COD-261).
+  await c.env.DB.prepare(
+    `UPDATE places SET
+       rating = COALESCE((SELECT ROUND(AVG(rating), 1) FROM reviews WHERE place_id = ?1 AND status = 'published'), 0),
+       reviews_count = (SELECT COUNT(*) FROM reviews WHERE place_id = ?1 AND status = 'published')
+     WHERE id = ?1`
+  )
+    .bind(placeId)
+    .run();
+
+  return c.json({ ok: true, review: { author: user.name, rating: r, body: body.trim() } }, 201);
+});
+
 app.get("/landmarks", async (c) => {
   const { results } = await c.env.DB.prepare(
     "SELECT id, name, kind, lat, lng FROM landmarks ORDER BY name"

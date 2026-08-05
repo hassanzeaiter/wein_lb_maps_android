@@ -4,11 +4,15 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RatingBar
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.lifecycleScope
 import com.wein.app.databinding.ActivityMainBinding
@@ -72,6 +76,59 @@ internal class PlaceDetailController(
     private fun renderReviews(reviews: List<Rev>) {
         binding.detailReviews.removeAllViews()
         reviews.forEach { binding.detailReviews.addView(reviewView(it)) }
+    }
+
+    /** Compose + post a review for the current place. Caller ensures the user is signed in. */
+    fun promptWriteReview() {
+        val p = currentPlace ?: return
+        if (p.id.isBlank()) { toast("Reviews aren't available for this place yet"); return }
+        val token = Session.token ?: return
+        val pad = dp(20)
+        val ratingBar = RatingBar(activity).apply { numStars = 5; stepSize = 1f; rating = 5f }
+        val bodyInput = EditText(activity).apply {
+            hint = "Share your experience…"
+            setLines(3)
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val layout = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, dp(8), pad, 0)
+            addView(ratingBar); addView(bodyInput)
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("Review ${p.name}")
+            .setView(layout)
+            .setPositiveButton("Post", null)   // null: validate below without auto-dismiss
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                // Body is optional — a star rating alone is a valid review.
+                submitReview(dialog, p.id, ratingBar.rating.toInt().coerceIn(1, 5),
+                    bodyInput.text.toString().trim(), token)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun submitReview(dialog: AlertDialog, placeId: String, rating: Int, body: String, token: String) {
+        activity.lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { PlacesApi.postReview(placeId, rating, body, token) }.getOrDefault(false)
+            }
+            if (!ok) { activity.toast("Couldn't post your review. Are you still signed in?"); return@launch }
+            activity.toast("Review posted — thank you!")
+            dialog.dismiss()
+            // Refresh from the backend (rating/count are recomputed server-side).
+            val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(placeId) }.getOrNull() }
+            val reviews = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchReviews(placeId) }.getOrNull() }.orEmpty()
+            if (currentPlace?.id == placeId) {
+                if (full != null) { currentPlace = full; bind(full) }
+                if (reviews.isNotEmpty()) renderReviews(reviews.map { Rev(it.author, it.rating, it.body) })
+            }
+        }
     }
 
     fun hide() {

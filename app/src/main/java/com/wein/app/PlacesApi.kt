@@ -53,6 +53,26 @@ object PlacesApi {
         return out
     }
 
+    /** Post (or update) the signed-in user's review. Returns true on success. */
+    fun postReview(placeId: String, rating: Int, body: String, token: String): Boolean {
+        val url = URL("$API_BASE_URL/places/" + URLEncoder.encode(placeId, "UTF-8") + "/reviews")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 8000; readTimeout = 8000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        return try {
+            conn.outputStream.use { it.write(JSONObject().put("rating", rating).put("body", body).toString().toByteArray()) }
+            conn.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** GET a path; returns the response body on 2xx, else null. */
     private fun get(path: String): String? {
         val conn = (URL("$API_BASE_URL$path").openConnection() as HttpURLConnection).apply {

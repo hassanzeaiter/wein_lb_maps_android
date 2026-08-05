@@ -194,7 +194,10 @@ class MainActivity : AppCompatActivity() {
             }
         )
         binding.claimBtn.setOnClickListener { toast("Claim & Promote — coming soon") }
-        binding.writeReviewBtn.setOnClickListener { toast("Write a review — coming soon") }
+        binding.writeReviewBtn.setOnClickListener {
+            if (Session.isLoggedIn) placeDetail.promptWriteReview()
+            else { toast("Sign in to write a review"); auth.onSignInClicked() }
+        }
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.tab_explore -> showExplore()
