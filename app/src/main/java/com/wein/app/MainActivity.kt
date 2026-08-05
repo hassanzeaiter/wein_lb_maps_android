@@ -120,6 +120,10 @@ class MainActivity : AppCompatActivity() {
     private var lastPuck: LatLng? = null
     private var lastBrg = 0.0
     private var puckAnim: android.animation.ValueAnimator? = null
+    // The arrow's own heading (compass degrees), smoothed and independent of the camera so
+    // it points the real travel direction even when the map is panned or mid-turn.
+    private var puckBrg = 0.0
+    private var puckPrimed = false
 
     // Voice guidance
     private var tts: android.speech.tts.TextToSpeech? = null
@@ -166,8 +170,11 @@ class MainActivity : AppCompatActivity() {
 
         // Off-route handling: how far off the suggested line counts as "off-route", and how
         // many consecutive off-route fixes to tolerate before rebuilding the route from here.
+        // A big single jump (HARD) reroutes at once, so we don't sit ~3 s off an obviously
+        // wrong line waiting for the fix count.
         private const val OFF_ROUTE_METERS = 60.0
-        private const val OFF_ROUTE_FIXES_BEFORE_REROUTE = 5
+        private const val OFF_ROUTE_HARD_METERS = 120.0
+        private const val OFF_ROUTE_FIXES_BEFORE_REROUTE = 3
         private const val REROUTE_COOLDOWN_MS = 12_000L
     }
 
@@ -448,7 +455,12 @@ class MainActivity : AppCompatActivity() {
                 PropertyFactory.iconSize(1.0f),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
-                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT),
+                // Rotate with the map to the feature's own heading, so the arrow always points
+                // the true travel direction (not just "up") regardless of the camera bearing;
+                // pitch-align to the viewport so it stays crisp and unforeshortened under tilt.
+                PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
+                PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+                PropertyFactory.iconRotate(Expression.get("bearing")),
             )
         )
         setOriginMarker(origin)
@@ -1435,6 +1447,7 @@ class MainActivity : AppCompatActivity() {
         navigating = true
         followingUser = true
         camPrimed = false
+        puckPrimed = false
         navProgress = 0.0
         navPtr = 0
         announcedPtr = -1
@@ -1521,7 +1534,8 @@ class MainActivity : AppCompatActivity() {
         if (snap.offRoute > OFF_ROUTE_METERS) {
             offRouteFixes++
             if (location.hasBearing() && location.speed > 1.0) lastBrg = location.bearing.toDouble()
-            updatePuck(raw)
+            updatePuckHeading(location, fallback = lastBrg)
+            updatePuck(raw, puckBrg)
             lastPuck = raw
             if (followingUser) {
                 navCamBrg = if (!camPrimed) lastBrg else lerpAngle(navCamBrg, lastBrg, 0.35)
@@ -1534,7 +1548,9 @@ class MainActivity : AppCompatActivity() {
                     ), 950,
                 )
             }
-            if (offRouteFixes >= OFF_ROUTE_FIXES_BEFORE_REROUTE) reroute(raw, dest)
+            if (offRouteFixes >= OFF_ROUTE_FIXES_BEFORE_REROUTE ||
+                snap.offRoute > OFF_ROUTE_HARD_METERS
+            ) reroute(raw, dest)
             return
         }
         offRouteFixes = 0
@@ -1563,7 +1579,8 @@ class MainActivity : AppCompatActivity() {
             if (location.hasBearing() && location.speed > 1.0) location.bearing.toDouble()
             else snap.bearing
 
-        updatePuck(pos)
+        updatePuckHeading(location, fallback = snap.bearing)
+        updatePuck(pos, puckBrg)
         lastPuck = pos
         lastBrg = heading
 
@@ -1808,18 +1825,36 @@ class MainActivity : AppCompatActivity() {
         binding.listFab.visibility = if (on) View.GONE else View.VISIBLE
     }
 
-    private fun setPuckAt(pos: LatLng) {
-        geoSource(SRC_PUCK)?.setGeoJson(Point.fromLngLat(pos.longitude, pos.latitude))
+    private fun setPuckAt(pos: LatLng, bearing: Double) {
+        val f = Feature.fromGeometry(Point.fromLngLat(pos.longitude, pos.latitude))
+        f.addNumberProperty("bearing", bearing)
+        geoSource(SRC_PUCK)?.setGeoJson(f)
+    }
+
+    /**
+     * Update the arrow's heading: use the device course while actually moving; when stopped or
+     * creeping (GPS bearing is meaningless at low speed) hold the last direction rather than
+     * spinning on noise. [fallback] orients the very first fix before we have a course.
+     */
+    private fun updatePuckHeading(location: android.location.Location, fallback: Double) {
+        val moving = location.hasBearing() && location.speed > 1.0
+        puckBrg = when {
+            !puckPrimed -> if (moving) location.bearing.toDouble() else fallback
+            moving -> lerpAngle(puckBrg, location.bearing.toDouble(), 0.5)
+            else -> puckBrg
+        }
+        puckPrimed = true
     }
 
     /**
      * Glide the puck from its last position to the new fix over ~1 s (fixes arrive ~1 s
-     * apart), so the anchor slides with the car instead of teleporting each update.
+     * apart), so the anchor slides with the car instead of teleporting each update. The
+     * arrow's [bearing] is held for the glide and refreshed on the next fix.
      */
-    private fun updatePuck(pos: LatLng) {
+    private fun updatePuck(pos: LatLng, bearing: Double) {
         val from = lastPuck
         puckAnim?.cancel()
-        if (from == null) { setPuckAt(pos); return }
+        if (from == null) { setPuckAt(pos, bearing); return }
         puckAnim = android.animation.ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 950
             interpolator = android.view.animation.LinearInterpolator()
@@ -1829,7 +1864,8 @@ class MainActivity : AppCompatActivity() {
                     LatLng(
                         from.latitude + (pos.latitude - from.latitude) * t,
                         from.longitude + (pos.longitude - from.longitude) * t,
-                    )
+                    ),
+                    bearing,
                 )
             }
             start()
