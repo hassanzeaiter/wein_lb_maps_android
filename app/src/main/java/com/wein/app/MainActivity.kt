@@ -50,6 +50,9 @@ class MainActivity : AppCompatActivity() {
     internal var map: MapLibreMap? = null
     private var style: Style? = null
 
+    // Directory shown as map pins. Starts as the bundled seed, refreshed from the backend.
+    private var mapPlaces: List<Place> = PLACES
+
     // Default trip start; changed by long-pressing a pin or using current location.
     internal var origin: Landmark = BEIRUT_LANDMARKS.first { it.name == "AUB Main Gate" }
     private var suppressWatcher = false
@@ -162,6 +165,7 @@ class MainActivity : AppCompatActivity() {
                 style = loaded
                 addMapLayers(loaded)
                 wireMapGestures(m)
+                loadMapPlaces()
                 if (!didAutoLocate) {
                     didAutoLocate = true
                     requestLocate(silent = true)   // start centered on the user, not AUB
@@ -295,16 +299,11 @@ class MainActivity : AppCompatActivity() {
             style.addImage("place-${cat.name}", makeMarker(PIN_COLOR, cat.glyph))
         }
 
-        // Our directory places, as tappable pins. Each feature carries its category so
-        // the map picks the right glyph (these are the real listings, not the landmarks —
-        // landmarks stay behind the scenes as the vocabulary for turn directions).
-        val features = PLACES.map { p ->
-            Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
-                addStringProperty("name", p.name)
-                addStringProperty("icon", "place-${p.category.name}")
-            }
-        }
-        style.addSource(GeoJsonSource(SRC_PLACES, FeatureCollection.fromFeatures(features)))
+        // Our directory places, as tappable pins. Each feature carries its category so the map
+        // picks the right glyph (these are the real listings, not the landmarks — landmarks stay
+        // behind the scenes as the vocabulary for turn directions). Starts as the bundled seed;
+        // loadMapPlaces() swaps in the backend directory once the style is ready.
+        style.addSource(GeoJsonSource(SRC_PLACES, placeFeatures(mapPlaces)))
         style.addSource(GeoJsonSource(SRC_ROUTE))
         style.addSource(GeoJsonSource(SRC_ORIGIN))
         style.addSource(GeoJsonSource(SRC_DEST))
@@ -810,7 +809,28 @@ class MainActivity : AppCompatActivity() {
         val screen = m.projection.toScreenLocation(point)
         val hit = m.queryRenderedFeatures(screen, "place-pins", "place-labels")
         val name = hit.firstOrNull { it.hasProperty("name") }?.getStringProperty("name") ?: return null
-        return PLACES.firstOrNull { it.name == name }
+        return mapPlaces.firstOrNull { it.name == name }
+    }
+
+    /** Build the pin GeoJSON for a set of places (one feature per place, with its category glyph). */
+    private fun placeFeatures(places: List<Place>): FeatureCollection = FeatureCollection.fromFeatures(
+        places.map { p ->
+            Feature.fromGeometry(Point.fromLngLat(p.lng, p.lat)).apply {
+                addStringProperty("name", p.name)
+                addStringProperty("icon", "place-${p.category.name}")
+            }
+        }
+    )
+
+    /** Load the directory from the backend and refresh the map pins (keeps the seed on failure). */
+    private fun loadMapPlaces() {
+        lifecycleScope.launch {
+            val fetched = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlaces() }.getOrNull() }
+            if (!fetched.isNullOrEmpty()) {
+                mapPlaces = fetched
+                geoSource(SRC_PLACES)?.setGeoJson(placeFeatures(fetched))
+            }
+        }
     }
 
     /** A directory place as a routing destination/origin (kept distinct from a dropped point). */
