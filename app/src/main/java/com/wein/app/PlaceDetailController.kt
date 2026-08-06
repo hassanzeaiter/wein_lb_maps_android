@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.text.InputType
+import android.widget.HorizontalScrollView
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
@@ -15,6 +16,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.lifecycle.lifecycleScope
+import coil.load
 import com.wein.app.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -65,10 +67,12 @@ internal class PlaceDetailController(
             activity.lifecycleScope.launch {
                 val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(p.id, Session.token) }.getOrNull() }
                 val reviews = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchReviews(p.id) }.getOrNull() }.orEmpty()
+                val photos = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlacePhotos(p.id) }.getOrNull() }.orEmpty()
                 // Ignore if the user has since opened a different place.
                 if (currentPlace?.id != p.id) return@launch
                 if (full != null) { currentPlace = full; bind(full) }
                 if (reviews.isNotEmpty()) renderReviews(reviews.map { Rev(it.author, it.rating, it.body) })
+                renderPhotoStrip(photos)
             }
         }
     }
@@ -84,7 +88,14 @@ internal class PlaceDetailController(
         if (p.id.isBlank()) { toast("Reviews aren't available for this place yet"); return }
         val token = Session.token ?: return
         val pad = dp(20)
-        val ratingBar = RatingBar(activity).apply { numStars = 5; stepSize = 1f; rating = 5f }
+        // WRAP_CONTENT is essential: a vertical LinearLayout defaults children to MATCH_PARENT,
+        // which makes RatingBar tile its star drawable into a long, un-tappable row of stars.
+        val ratingBar = RatingBar(activity).apply {
+            numStars = 5; stepSize = 1f; rating = 5f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
         val bodyInput = EditText(activity).apply {
             hint = "Share your experience…"
             setLines(3)
@@ -92,10 +103,35 @@ internal class PlaceDetailController(
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                 InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         }
+
+        // Optional photos attached to the review — collected here, uploaded after the post.
+        val picked = ArrayList<Uri>()
+        val thumbs = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+        val thumbsScroll = HorizontalScrollView(activity).apply {
+            isHorizontalScrollBarEnabled = false
+            visibility = View.GONE
+            addView(thumbs)
+        }
+        val addPhotos = TextView(activity).apply {
+            text = "＋ Add photos"
+            textSize = 14.5f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.parseColor("#202124"))
+            setPadding(0, dp(12), 0, dp(4))
+            isClickable = true
+            setOnClickListener {
+                activity.pickImages { uris ->
+                    picked.clear(); picked.addAll(uris)
+                    renderReviewThumbs(thumbs, picked)
+                    thumbsScroll.visibility = if (picked.isEmpty()) View.GONE else View.VISIBLE
+                }
+            }
+        }
+
         val layout = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, dp(8), pad, 0)
-            addView(ratingBar); addView(bodyInput)
+            addView(ratingBar); addView(bodyInput); addView(addPhotos); addView(thumbsScroll)
         }
         val dialog = AlertDialog.Builder(activity)
             .setTitle("Review ${p.name}")
@@ -107,26 +143,61 @@ internal class PlaceDetailController(
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 // Body is optional — a star rating alone is a valid review.
                 submitReview(dialog, p.id, ratingBar.rating.toInt().coerceIn(1, 5),
-                    bodyInput.text.toString().trim(), token)
+                    bodyInput.text.toString().trim(), token, ArrayList(picked))
             }
         }
         dialog.show()
     }
 
-    private fun submitReview(dialog: AlertDialog, placeId: String, rating: Int, body: String, token: String) {
+    /** Render the picked-photo thumbnails inside the review dialog. */
+    private fun renderReviewThumbs(container: LinearLayout, uris: List<Uri>) {
+        container.removeAllViews()
+        uris.forEach { uri ->
+            container.addView(ImageView(activity).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
+                clipToOutline = true
+                layoutParams = LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(8); topMargin = dp(6) }
+                load(uri) { crossfade(true) }
+            })
+        }
+    }
+
+    private fun submitReview(
+        dialog: AlertDialog,
+        placeId: String,
+        rating: Int,
+        body: String,
+        token: String,
+        photos: List<Uri>,
+    ) {
         activity.lifecycleScope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching { PlacesApi.postReview(placeId, rating, body, token) }.getOrDefault(false)
+            val reviewId = withContext(Dispatchers.IO) {
+                runCatching { PlacesApi.postReview(placeId, rating, body, token) }.getOrNull()
             }
-            if (!ok) { activity.toast("Couldn't post your review. Are you still signed in?"); return@launch }
+            if (reviewId == null) { activity.toast("Couldn't post your review. Are you still signed in?"); return@launch }
             activity.toast("Review posted — thank you!")
             dialog.dismiss()
+
+            // Upload any attached photos against the new review (best-effort).
+            if (photos.isNotEmpty()) {
+                val n = withContext(Dispatchers.IO) {
+                    photos.count { uri ->
+                        val bytes = activity.readImageAsJpeg(uri) ?: return@count false
+                        PlacesApi.uploadPhoto(placeId, bytes, "image/jpeg", token, reviewId)
+                    }
+                }
+                activity.toast(if (n > 0) "Added $n photo${if (n > 1) "s" else ""}" else "Review saved; photos couldn't upload")
+            }
+
             // Refresh from the backend (rating/count are recomputed server-side).
-            val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(placeId) }.getOrNull() }
+            val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(placeId, token) }.getOrNull() }
             val reviews = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchReviews(placeId) }.getOrNull() }.orEmpty()
+            val newPhotos = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlacePhotos(placeId) }.getOrNull() }.orEmpty()
             if (currentPlace?.id == placeId) {
                 if (full != null) { currentPlace = full; bind(full) }
                 if (reviews.isNotEmpty()) renderReviews(reviews.map { Rev(it.author, it.rating, it.body) })
+                renderPhotoStrip(newPhotos)
             }
         }
     }
@@ -168,17 +239,77 @@ internal class PlaceDetailController(
         val start = Math.abs(p.name.hashCode()) % reviewPool.size
         renderReviews((0 until 3).map { reviewPool[(start + it) % reviewPool.size] })
 
-        // Photos (placeholders)
+        // Photos — just the "Add photo" tile until show() swaps in the real strip.
+        renderPhotoStrip(emptyList())
+    }
+
+    /** The horizontal photo strip: an "Add photo" tile followed by the place's photos. */
+    private fun renderPhotoStrip(photos: List<PlacePhoto>) {
         binding.detailPhotos.removeAllViews()
-        repeat(4) {
+        binding.detailPhotos.addView(addPhotoTile())
+        photos.forEach { photo ->
             binding.detailPhotos.addView(ImageView(activity).apply {
-                setImageResource(p.category.glyph)
-                alpha = 0.3f
-                imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#3C4043"))
+                scaleType = ImageView.ScaleType.CENTER_CROP
                 background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
-                val pad = dp(22); setPadding(pad, pad, pad, pad)
+                clipToOutline = true
                 layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(10) }
+                load(photo.url) { crossfade(true) }
             })
+        }
+    }
+
+    private fun addPhotoTile(): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        background = AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
+        isClickable = true
+        layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(10) }
+        addView(ImageView(activity).apply {
+            setImageResource(R.drawable.ic_add_photo)
+            imageTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#5F6368"))
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28))
+        })
+        addView(TextView(activity).apply {
+            text = "Add photo"
+            textSize = 11.5f
+            setTextColor(Color.parseColor("#5F6368"))
+            setPadding(0, dp(4), 0, 0)
+        })
+        setOnClickListener { onAddPhotoClicked() }
+    }
+
+    /** Pick images and upload them for the current place, then refresh the strip. */
+    private fun onAddPhotoClicked() {
+        val p = currentPlace ?: return
+        if (p.id.isBlank()) { toast("Photos aren't available for this place yet"); return }
+        val token = Session.token
+        if (token == null) { toast("Sign in to add photos"); activity.promptSignIn(); return }
+        activity.pickImages { uris ->
+            activity.lifecycleScope.launch {
+                toast(if (uris.size == 1) "Uploading photo…" else "Uploading ${uris.size} photos…")
+                val added = withContext(Dispatchers.IO) {
+                    uris.count { uri ->
+                        val bytes = activity.readImageAsJpeg(uri) ?: return@count false
+                        PlacesApi.uploadPhoto(p.id, bytes, "image/jpeg", token)
+                    }
+                }
+                if (currentPlace?.id != p.id) return@launch
+                if (added > 0) {
+                    toast(if (added == 1) "Photo added" else "$added photos added")
+                    refreshPhotos(p.id)
+                } else {
+                    toast("Couldn't upload. Please try again.")
+                }
+            }
+        }
+    }
+
+    private fun refreshPhotos(placeId: String) {
+        activity.lifecycleScope.launch {
+            val photos = withContext(Dispatchers.IO) {
+                runCatching { PlacesApi.fetchPlacePhotos(placeId) }.getOrNull()
+            }.orEmpty()
+            if (currentPlace?.id == placeId) renderPhotoStrip(photos)
         }
     }
 

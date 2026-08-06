@@ -3,9 +3,11 @@ package com.wein.app
 import android.graphics.Color
 import android.graphics.Typeface
 import android.view.View
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.lifecycle.lifecycleScope
+import coil.load
 import com.wein.app.databinding.ActivityMainBinding
 import com.wein.app.databinding.ItemPlaceBinding
 import kotlinx.coroutines.Dispatchers
@@ -158,18 +160,36 @@ internal class ProfileController(
     private fun renderPhotos(photos: List<MyPhoto>?) {
         binding.profileSubProgress.visibility = View.GONE
         if (photos == null) { showEmpty(LOAD_ERROR); return }
-        // R2 uploads land in COD-253; until then this is always the empty state.
         if (photos.isEmpty()) {
-            showEmpty("You haven't added any photos yet.\nPhoto uploads are coming soon.")
+            showEmpty("You haven't added any photos yet.\nAdd photos from any place to see them here.")
             return
         }
+        // A simple 3-column grid; each thumbnail deep-links to its place.
+        val cols = 3
+        val gap = dp(3)
+        val size = (activity.resources.displayMetrics.widthPixels - dp(16) * 2 - gap * (cols - 1)) / cols
+        var row: LinearLayout? = null
         photos.forEachIndexed { i, ph ->
-            if (i > 0) binding.profileSubList.addView(hairline())
-            binding.profileSubList.addView(
-                activity.infoRow(R.drawable.ic_cat_shopping, ph.placeName, "Photo") {
-                    openPlaceById(ph.placeId)
+            if (i % cols == 0) {
+                row = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = gap; marginStart = dp(16); marginEnd = dp(16) }
                 }
-            )
+                binding.profileSubList.addView(row)
+            }
+            row!!.addView(ImageView(activity).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = androidx.appcompat.content.res.AppCompatResources.getDrawable(context, R.drawable.thumb_bg)
+                clipToOutline = true
+                isClickable = true
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    if (i % cols != 0) marginStart = gap
+                }
+                load(ph.url) { crossfade(true) }
+                setOnClickListener { openPlaceById(ph.placeId) }
+            })
         }
     }
 

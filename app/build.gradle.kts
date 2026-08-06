@@ -41,4 +41,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.maplibre.gl:android-sdk:11.8.4")
+    implementation("io.coil-kt:coil:2.7.0")
 }

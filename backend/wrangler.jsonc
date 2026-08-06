@@ -15,5 +15,11 @@
       "database_id": "a3173162-abea-46da-9016-6e9989d62cf2",
       "migrations_dir": "migrations"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "wein-photos"
+    }
   ]
 }
