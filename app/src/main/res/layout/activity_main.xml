@@ -946,6 +946,85 @@
         </LinearLayout>
     </FrameLayout>
 
+    <!-- ===== Profile sub-screen: Saved places / My reviews / My photos (COD-255) ===== -->
+    <FrameLayout
+        android:id="@+id/profileSubScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/paper"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/profileSubBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="56dp"
+                android:orientation="horizontal"
+                android:paddingHorizontal="6dp">
+
+                <ImageButton
+                    android:id="@+id/profileSubBack"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Back"
+                    android:src="@drawable/ic_back"
+                    app:tint="@color/ink" />
+
+                <TextView
+                    android:id="@+id/profileSubTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <androidx.core.widget.NestedScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:id="@+id/profileSubList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="32dp" />
+            </androidx.core.widget.NestedScrollView>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/profileSubEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:paddingHorizontal="40dp"
+            android:textColor="@color/ink_muted"
+            android:textSize="15sp"
+            android:visibility="gone" />
+
+        <ProgressBar
+            android:id="@+id/profileSubProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:indeterminateTint="@color/ink"
+            android:visibility="gone" />
+    </FrameLayout>
+
     <!-- ===== Bottom navigation ===== -->
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNav"

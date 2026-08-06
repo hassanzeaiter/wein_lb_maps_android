@@ -4,6 +4,7 @@ import {
   bearer,
   createSession,
   hashPassword,
+  optionalUser,
   requireAuth,
   sha256Hex,
   verifyPassword,
@@ -131,14 +132,23 @@ app.get("/places", async (c) => {
 });
 
 app.get("/places/:id", async (c) => {
+  const id = c.req.param("id");
   const row = await c.env.DB.prepare(
     "SELECT id, name, category, price, area, landmark_cue, lat, lng, promoted, open_now, rating, reviews_count, phone FROM places WHERE id = ?"
   )
-    .bind(c.req.param("id"))
+    .bind(id)
     .first<PlaceRow>();
   if (!row) return c.json({ error: "not_found" }, 404);
+  // If the request is authenticated, report whether this user has bookmarked the place
+  // so the app can render the Save button in its correct on/off state.
+  const user = await optionalUser(c);
+  const saved = user
+    ? !!(await c.env.DB.prepare("SELECT 1 FROM saved_places WHERE user_id = ? AND place_id = ?")
+        .bind(user.id, id)
+        .first())
+    : false;
   // Detail carries the richer fields the list omits (phone now; hours/photos later).
-  return c.json({ ...toPlace(row), phone: row.phone });
+  return c.json({ ...toPlace(row), phone: row.phone, saved });
 });
 
 /** Published community reviews for a place, newest first (COD-260). */
@@ -185,6 +195,27 @@ app.post("/places/:id/reviews", requireAuth, async (c) => {
     .run();
 
   return c.json({ ok: true, review: { author: user.name, rating: r, body: body.trim() } }, 201);
+});
+
+/** Bookmark a place for the signed-in user (Profile → Saved places). Idempotent. */
+app.post("/places/:id/save", requireAuth, async (c) => {
+  const placeId = c.req.param("id");
+  const place = await c.env.DB.prepare("SELECT id FROM places WHERE id = ?").bind(placeId).first();
+  if (!place) return c.json({ error: "not_found" }, 404);
+  await c.env.DB.prepare(
+    "INSERT INTO saved_places (user_id, place_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
+  )
+    .bind(c.get("user").id, placeId)
+    .run();
+  return c.json({ ok: true, saved: true });
+});
+
+/** Remove a bookmark. Idempotent. */
+app.delete("/places/:id/save", requireAuth, async (c) => {
+  await c.env.DB.prepare("DELETE FROM saved_places WHERE user_id = ? AND place_id = ?")
+    .bind(c.get("user").id, c.req.param("id"))
+    .run();
+  return c.json({ ok: true, saved: false });
 });
 
 app.get("/landmarks", async (c) => {
@@ -236,6 +267,51 @@ app.post("/auth/logout", requireAuth, async (c) => {
 });
 
 app.get("/me", requireAuth, (c) => c.json({ user: c.get("user") }));
+
+// ---- Profile surfaces (COD-255) --------------------------------------------
+
+/** The user's bookmarked places, newest-saved first — same shape as GET /places. */
+app.get("/me/saved", requireAuth, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.id, p.name, p.category, p.price, p.area, p.landmark_cue, p.lat, p.lng,
+            p.promoted, p.open_now, p.rating, p.reviews_count, p.phone
+     FROM saved_places s JOIN places p ON p.id = s.place_id
+     WHERE s.user_id = ?
+     ORDER BY s.created_at DESC`
+  )
+    .bind(c.get("user").id)
+    .all<PlaceRow>();
+  const places = results.map((r) => ({ ...toPlace(r), saved: true }));
+  return c.json({ count: places.length, places });
+});
+
+/** The user's own reviews, newest first, each carrying its place for display + deep-link. */
+app.get("/me/reviews", requireAuth, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id, r.rating, r.body, r.created_at AS createdAt,
+            p.id AS placeId, p.name AS placeName, p.category AS placeCategory, p.area AS placeArea
+     FROM reviews r JOIN places p ON p.id = r.place_id
+     WHERE r.user_id = ?
+     ORDER BY r.created_at DESC`
+  )
+    .bind(c.get("user").id)
+    .all();
+  return c.json({ count: results.length, reviews: results });
+});
+
+/** The user's uploaded photos, newest first (R2 uploads land in COD-253; empty until then). */
+app.get("/me/photos", requireAuth, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT ph.id, ph.r2_key AS r2Key, ph.created_at AS createdAt,
+            p.id AS placeId, p.name AS placeName
+     FROM photos ph JOIN places p ON p.id = ph.place_id
+     WHERE ph.user_id = ? AND ph.status = 'published'
+     ORDER BY ph.created_at DESC`
+  )
+    .bind(c.get("user").id)
+    .all();
+  return c.json({ count: results.length, photos: results });
+});
 
 app.onError((err, c) => {
   console.log(JSON.stringify({ level: "error", msg: "unhandled", error: String(err), path: c.req.path }));

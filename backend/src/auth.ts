@@ -65,16 +65,25 @@ function bearer(c: Parameters<MiddlewareHandler<AuthEnv>>[0]): string | null {
   return h.startsWith("Bearer ") ? h.slice(7) : null;
 }
 
+/** Resolve the user for the request's bearer token, or null if absent/invalid/expired. */
+export async function optionalUser(
+  c: Parameters<MiddlewareHandler<AuthEnv>>[0]
+): Promise<AuthUser | null> {
+  const token = bearer(c);
+  if (!token) return null;
+  return (
+    (await c.env.DB.prepare(
+      `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.token_hash = ? AND s.expires_at > datetime('now')`
+    )
+      .bind(await sha256Hex(token))
+      .first<AuthUser>()) ?? null
+  );
+}
+
 /** Gate a route on a valid, unexpired session; attaches the user to the context. */
 export const requireAuth: MiddlewareHandler<AuthEnv> = async (c, next) => {
-  const token = bearer(c);
-  if (!token) return c.json({ error: "unauthorized" }, 401);
-  const user = await c.env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token_hash = ? AND s.expires_at > datetime('now')`
-  )
-    .bind(await sha256Hex(token))
-    .first<AuthUser>();
+  const user = await optionalUser(c);
   if (!user) return c.json({ error: "unauthorized" }, 401);
   c.set("user", user);
   await next();

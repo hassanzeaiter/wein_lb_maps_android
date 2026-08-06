@@ -60,10 +60,10 @@ internal class PlaceDetailController(
         binding.placeDetailScreen.visibility = View.VISIBLE
         binding.bottomNav.visibility = View.GONE
 
-        // Then refresh from the backend: authoritative detail (phone) + real community reviews.
+        // Then refresh from the backend: authoritative detail (phone, saved) + real reviews.
         if (p.id.isNotBlank()) {
             activity.lifecycleScope.launch {
-                val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(p.id) }.getOrNull() }
+                val full = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchPlace(p.id, Session.token) }.getOrNull() }
                 val reviews = withContext(Dispatchers.IO) { runCatching { PlacesApi.fetchReviews(p.id) }.getOrNull() }.orEmpty()
                 // Ignore if the user has since opened a different place.
                 if (currentPlace?.id != p.id) return@launch
@@ -162,16 +162,7 @@ internal class PlaceDetailController(
             "${p.name} is a well-known $cat in ${p.area}. ${p.landmark} — " +
             "the kind of spot locals point you to by landmark, not by address."
 
-        // Actions
-        binding.actionsRow.removeAllViews()
-        binding.actionsRow.addView(actionItem(R.drawable.ic_nav, "Directions", true) { directionsToCurrentPlace() })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) {
-            val phone = p.phone
-            if (phone.isNullOrBlank()) toast("No phone number yet")
-            else activity.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
-        })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_bookmark, "Save", false) { toast("Saved to your places") })
-        binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
+        renderActions(p)
 
         // Reviews — sample for now; show() swaps in real backend reviews when available.
         val start = Math.abs(p.name.hashCode()) % reviewPool.size
@@ -188,6 +179,47 @@ internal class PlaceDetailController(
                 val pad = dp(22); setPadding(pad, pad, pad, pad)
                 layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(10) }
             })
+        }
+    }
+
+    /** The Directions / Call / Save / Share row. Re-rendered on its own when Save toggles. */
+    private fun renderActions(p: Place) {
+        binding.actionsRow.removeAllViews()
+        binding.actionsRow.addView(actionItem(R.drawable.ic_nav, "Directions", true) { directionsToCurrentPlace() })
+        binding.actionsRow.addView(actionItem(R.drawable.ic_call, "Call", false) {
+            val phone = p.phone
+            if (phone.isNullOrBlank()) toast("No phone number yet")
+            else activity.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
+        })
+        binding.actionsRow.addView(
+            actionItem(R.drawable.ic_bookmark, if (p.saved) "Saved" else "Save", filled = p.saved) { toggleSave() }
+        )
+        binding.actionsRow.addView(actionItem(R.drawable.ic_share, "Share", false) { toast("Share — coming soon") })
+    }
+
+    /** Save / un-save the current place. Optimistic: flip immediately, revert on failure. */
+    private fun toggleSave() {
+        val p = currentPlace ?: return
+        if (p.id.isBlank()) { toast("This place can't be saved yet"); return }
+        val token = Session.token
+        if (token == null) { toast("Sign in to save places"); activity.promptSignIn(); return }
+
+        val target = !p.saved
+        val updated = p.copy(saved = target)
+        currentPlace = updated
+        renderActions(updated)                       // optimistic UI
+        activity.lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { PlacesApi.setSaved(p.id, target, token) }.getOrDefault(false)
+            }
+            if (currentPlace?.id != p.id) return@launch   // user moved on
+            if (ok) {
+                toast(if (target) "Saved to your places" else "Removed from saved")
+            } else {
+                currentPlace = p                     // revert
+                renderActions(p)
+                toast("Couldn't update. Are you still signed in?")
+            }
         }
     }
 

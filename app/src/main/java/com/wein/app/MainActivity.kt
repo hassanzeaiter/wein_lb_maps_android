@@ -74,6 +74,9 @@ class MainActivity : AppCompatActivity() {
     // Sign in / sign up + Profile header — self-contained; see AuthController.
     private val auth by lazy { AuthController(this, binding) }
 
+    // Profile menu + Saved/Reviews/Photos sub-screens — self-contained; see ProfileController.
+    private val profile by lazy { ProfileController(this, binding) { placeDetail.show(it) } }
+
     internal lateinit var sheet: BottomSheetBehavior<*>
     private var didAutoLocate = false
 
@@ -567,6 +570,7 @@ class MainActivity : AppCompatActivity() {
         binding.exploreScreen.visibility = View.VISIBLE
         binding.contributeScreen.visibility = View.GONE
         binding.profileScreen.visibility = View.GONE
+        profile.hide()
         binding.bottomNav.visibility = View.VISIBLE
         hideMapOverlays()
     }
@@ -575,6 +579,7 @@ class MainActivity : AppCompatActivity() {
         binding.exploreScreen.visibility = View.GONE
         binding.contributeScreen.visibility = View.VISIBLE
         binding.profileScreen.visibility = View.GONE
+        profile.hide()
         binding.bottomNav.visibility = View.VISIBLE
         hideMapOverlays()
     }
@@ -583,6 +588,7 @@ class MainActivity : AppCompatActivity() {
         binding.exploreScreen.visibility = View.GONE
         binding.contributeScreen.visibility = View.GONE
         binding.profileScreen.visibility = View.VISIBLE
+        profile.hide()
         binding.bottomNav.visibility = View.VISIBLE
         hideMapOverlays()
     }
@@ -617,28 +623,19 @@ class MainActivity : AppCompatActivity() {
     private fun setupProfile() {
         binding.signInBtn.setOnClickListener { auth.onSignInClicked() }
         auth.refreshProfileHeader()
-        val rows = listOf(
-            Triple(R.drawable.ic_list, "Saved places", "Your bookmarks"),
-            Triple(R.drawable.ic_star, "My reviews", "Reviews you've written"),
-            Triple(R.drawable.ic_cat_shopping, "My photos", "Photos you've added"),
-            Triple(R.drawable.ic_cat_atm, "Business tools", "Claim & promote your place"),
-            Triple(R.drawable.ic_tab_explore, "Settings", "App preferences"),
-        )
-        binding.profileList.removeAllViews()
-        rows.forEachIndexed { i, (ic, t, s) ->
-            if (i > 0) binding.profileList.addView(placeDivider())
-            binding.profileList.addView(infoRow(ic, t, s))
-        }
-        // OSM attribution (kept off the map, shown here for license compliance).
-        binding.profileList.addView(TextView(this).apply {
-            text = "Map data © OpenStreetMap contributors · Tiles by OpenFreeMap"
-            setTextColor(Color.parseColor("#9AA0A6"))
-            textSize = 12f
-            setPadding(dp(20), dp(28), dp(20), dp(8))
-        })
+        profile.setup()
+        binding.profileSubBack.setOnClickListener { profile.hide() }
     }
 
-    private fun infoRow(icon: Int, title: String, subtitle: String): View {
+    /** Open the sign-in dialog (used by actions that require an account, e.g. Save). */
+    internal fun promptSignIn() = auth.onSignInClicked()
+
+    internal fun infoRow(
+        icon: Int,
+        title: String,
+        subtitle: String,
+        onClick: () -> Unit = { toast("$title — coming soon") },
+    ): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -671,11 +668,11 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, dp(1), 0, 0)
             })
         })
-        row.setOnClickListener { toast("$title — coming soon") }
+        row.setOnClickListener { onClick() }
         return row
     }
 
-    private fun placeDivider(): View = View(this).apply {
+    internal fun placeDivider(): View = View(this).apply {
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply {
             marginStart = dp(92)
         }
@@ -921,6 +918,7 @@ class MainActivity : AppCompatActivity() {
             binding.profileHeader.setPadding(dp(20), bars.top + dp(12), dp(20), dp(10))
             binding.bottomNav.setPadding(0, 0, 0, bars.bottom)
             binding.detailTopBar.setPadding(dp(6), bars.top, dp(6), 0)
+            binding.profileSubBar.setPadding(dp(6), bars.top, dp(6), 0)
             binding.searchCard.requestLayout()
             binding.locateFab.requestLayout()
             binding.navBanner.requestLayout()
@@ -948,6 +946,8 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (placeDetail.isVisible()) {
             placeDetail.hide()
+        } else if (profile.isVisible()) {
+            profile.hide()
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
