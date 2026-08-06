@@ -17,8 +17,11 @@ data class MyReview(
     val body: String,
 )
 
-/** One of the signed-in user's uploaded photos, from GET /me/photos. */
-data class MyPhoto(val placeId: String, val placeName: String, val r2Key: String)
+/** One of the signed-in user's uploaded photos, from GET /me/photos. [url] is absolute. */
+data class MyPhoto(val placeId: String, val placeName: String, val url: String)
+
+/** A photo on a place, from GET /places/:id/photos. [url] is absolute; [reviewId] set if attached to a review. */
+data class PlacePhoto(val id: String, val url: String, val reviewId: String?)
 
 /**
  * Thin client for the Wein backend directory API (GET /places).
@@ -110,11 +113,59 @@ object PlacesApi {
                 MyPhoto(
                     placeId = o.optString("placeId", ""),
                     placeName = o.optString("placeName", ""),
-                    r2Key = o.optString("r2Key", ""),
+                    url = API_BASE_URL + o.optString("url", ""),
                 )
             )
         }
         return out
+    }
+
+    /** Published photos for a place (GET /places/:id/photos), newest first. Empty on failure. */
+    fun fetchPlacePhotos(placeId: String): List<PlacePhoto> {
+        val body = get("/places/" + URLEncoder.encode(placeId, "UTF-8") + "/photos") ?: return emptyList()
+        val arr = JSONObject(body).optJSONArray("photos") ?: return emptyList()
+        val out = ArrayList<PlacePhoto>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            out.add(
+                PlacePhoto(
+                    id = o.optString("id", ""),
+                    url = API_BASE_URL + o.optString("url", ""),
+                    reviewId = if (o.isNull("reviewId")) null else o.optString("reviewId").ifBlank { null },
+                )
+            )
+        }
+        return out
+    }
+
+    /**
+     * Upload one photo's [bytes] for a place. [contentType] must be image/jpeg|png|webp.
+     * Pass [reviewId] to attach it to the user's review. Returns true on success.
+     */
+    fun uploadPhoto(
+        placeId: String,
+        bytes: ByteArray,
+        contentType: String,
+        token: String,
+        reviewId: String? = null,
+    ): Boolean {
+        val query = if (reviewId != null) "?review_id=" + URLEncoder.encode(reviewId, "UTF-8") else ""
+        val url = URL("$API_BASE_URL/places/" + URLEncoder.encode(placeId, "UTF-8") + "/photos" + query)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 10000; readTimeout = 20000
+            setRequestProperty("Content-Type", contentType)
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        return try {
+            conn.outputStream.use { it.write(bytes) }
+            conn.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /** Published reviews for a place (GET /places/:id/reviews), newest first. */
@@ -135,8 +186,8 @@ object PlacesApi {
         return out
     }
 
-    /** Post (or update) the signed-in user's review. Returns true on success. */
-    fun postReview(placeId: String, rating: Int, body: String, token: String): Boolean {
+    /** Post (or update) the signed-in user's review. Returns the review id, or null on failure. */
+    fun postReview(placeId: String, rating: Int, body: String, token: String): String? {
         val url = URL("$API_BASE_URL/places/" + URLEncoder.encode(placeId, "UTF-8") + "/reviews")
         val conn = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -147,9 +198,11 @@ object PlacesApi {
         }
         return try {
             conn.outputStream.use { it.write(JSONObject().put("rating", rating).put("body", body).toString().toByteArray()) }
-            conn.responseCode in 200..299
+            if (conn.responseCode !in 200..299) return null
+            val text = conn.inputStream.bufferedReader().use { it.readText() }
+            JSONObject(text).optJSONObject("review")?.optString("id")?.ifBlank { null }
         } catch (e: Exception) {
-            false
+            null
         } finally {
             conn.disconnect()
         }

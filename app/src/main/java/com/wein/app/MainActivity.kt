@@ -94,6 +94,53 @@ class MainActivity : AppCompatActivity() {
     internal val notifPermLauncher =
         registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
 
+    // System photo picker (COD-253). One-shot callback is set by whoever launches it.
+    private var onImagesPicked: ((List<android.net.Uri>) -> Unit)? = null
+    private val photoPicker =
+        registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(8)
+        ) { uris ->
+            val cb = onImagesPicked
+            onImagesPicked = null
+            if (!uris.isNullOrEmpty()) cb?.invoke(uris)
+        }
+
+    /** Launch the image picker; the picked URIs are delivered to [onPicked]. */
+    internal fun pickImages(onPicked: (List<android.net.Uri>) -> Unit) {
+        onImagesPicked = onPicked
+        photoPicker.launch(
+            androidx.activity.result.PickVisualMediaRequest(
+                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+            )
+        )
+    }
+
+    /**
+     * Decode a picked image, downscale to ≤1600px, and JPEG-encode it for upload. Runs the
+     * heavy decode off the caller's dispatcher expectation (call from IO). Null if unreadable.
+     */
+    internal fun readImageAsJpeg(uri: android.net.Uri): ByteArray? = try {
+        val maxDim = 1600
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDim * 2) sample *= 2
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bmp = contentResolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, opts)
+        } ?: return null
+        val scale = minOf(1f, maxDim.toFloat() / maxOf(bmp.width, bmp.height))
+        val scaled = if (scale < 1f)
+            Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true)
+        else bmp
+        java.io.ByteArrayOutputStream().use { out ->
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            out.toByteArray()
+        }
+    } catch (e: Exception) {
+        null
+    }
+
     // The "End" action on the nav notification broadcasts here so we tear the session down
     // through the same path as the in-app End button.
     private val endNavReceiver = object : android.content.BroadcastReceiver() {

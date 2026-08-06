@@ -49,6 +49,14 @@ function toPlace(r: PlaceRow, distanceM?: number) {
   };
 }
 
+/** Allowed photo content types → file extension. */
+const PHOTO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+const MAX_PHOTO_BYTES = 6 * 1024 * 1024; // 6 MB
+
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -194,7 +202,14 @@ app.post("/places/:id/reviews", requireAuth, async (c) => {
     .bind(placeId)
     .run();
 
-  return c.json({ ok: true, review: { author: user.name, rating: r, body: body.trim() } }, 201);
+  // The (possibly pre-existing) review's id, so the client can attach photos to it.
+  const saved = await c.env.DB.prepare(
+    "SELECT id FROM reviews WHERE place_id = ? AND user_id = ?"
+  )
+    .bind(placeId, user.id)
+    .first<{ id: string }>();
+
+  return c.json({ ok: true, review: { id: saved?.id, author: user.name, rating: r, body: body.trim() } }, 201);
 });
 
 /** Bookmark a place for the signed-in user (Profile → Saved places). Idempotent. */
@@ -216,6 +231,79 @@ app.delete("/places/:id/save", requireAuth, async (c) => {
     .bind(c.get("user").id, c.req.param("id"))
     .run();
   return c.json({ ok: true, saved: false });
+});
+
+// ---- Photos (COD-253) ------------------------------------------------------
+
+/**
+ * Upload a photo for a place (raw image bytes in the body; Content-Type must be
+ * image/jpeg|png|webp). Pass ?review_id= to attach it to one of your reviews of
+ * this place; otherwise it's a place photo. Stored in R2, indexed in `photos`.
+ */
+app.post("/places/:id/photos", requireAuth, async (c) => {
+  const placeId = c.req.param("id");
+  const contentType = (c.req.header("Content-Type") ?? "").split(";")[0].trim().toLowerCase();
+  const ext = PHOTO_EXT[contentType];
+  if (!ext) return c.json({ error: "unsupported_type" }, 415);
+
+  const place = await c.env.DB.prepare("SELECT id FROM places WHERE id = ?").bind(placeId).first();
+  if (!place) return c.json({ error: "not_found" }, 404);
+
+  const userId = c.get("user").id;
+  const reviewId = c.req.query("review_id")?.trim() || null;
+  if (reviewId) {
+    const owns = await c.env.DB.prepare(
+      "SELECT id FROM reviews WHERE id = ? AND place_id = ? AND user_id = ?"
+    )
+      .bind(reviewId, placeId, userId)
+      .first();
+    if (!owns) return c.json({ error: "review_not_found" }, 404);
+  }
+
+  const bytes = await c.req.arrayBuffer();
+  if (bytes.byteLength === 0) return c.json({ error: "empty" }, 400);
+  if (bytes.byteLength > MAX_PHOTO_BYTES) return c.json({ error: "too_large" }, 413);
+
+  const id = crypto.randomUUID();
+  const key = `places/${placeId}/${id}.${ext}`;
+  await c.env.PHOTOS.put(key, bytes, { httpMetadata: { contentType } });
+  await c.env.DB.prepare(
+    "INSERT INTO photos (id, place_id, review_id, user_id, r2_key) VALUES (?, ?, ?, ?, ?)"
+  )
+    .bind(id, placeId, reviewId, userId, key)
+    .run();
+
+  return c.json({ id, url: `/photos/${id}` }, 201);
+});
+
+/** Published photos for a place, newest first. url is the GET /photos/:id endpoint. */
+app.get("/places/:id/photos", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, review_id AS reviewId, created_at AS createdAt
+     FROM photos WHERE place_id = ? AND status = 'published'
+     ORDER BY created_at DESC`
+  )
+    .bind(c.req.param("id"))
+    .all<{ id: string; reviewId: string | null; createdAt: string }>();
+  const photos = results.map((p) => ({ ...p, url: `/photos/${p.id}` }));
+  return c.json({ count: photos.length, photos });
+});
+
+/** Stream a photo's bytes from R2 (long-lived cache; the id + object are immutable). */
+app.get("/photos/:id", async (c) => {
+  const row = await c.env.DB.prepare(
+    "SELECT r2_key FROM photos WHERE id = ? AND status = 'published'"
+  )
+    .bind(c.req.param("id"))
+    .first<{ r2_key: string }>();
+  if (!row) return c.json({ error: "not_found" }, 404);
+  const obj = await c.env.PHOTOS.get(row.r2_key);
+  if (!obj) return c.json({ error: "not_found" }, 404);
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set("etag", obj.httpEtag);
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  return new Response(obj.body, { headers });
 });
 
 app.get("/landmarks", async (c) => {
@@ -299,18 +387,18 @@ app.get("/me/reviews", requireAuth, async (c) => {
   return c.json({ count: results.length, reviews: results });
 });
 
-/** The user's uploaded photos, newest first (R2 uploads land in COD-253; empty until then). */
+/** The user's uploaded photos, newest first. url is the GET /photos/:id endpoint. */
 app.get("/me/photos", requireAuth, async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT ph.id, ph.r2_key AS r2Key, ph.created_at AS createdAt,
-            p.id AS placeId, p.name AS placeName
+    `SELECT ph.id, ph.created_at AS createdAt, p.id AS placeId, p.name AS placeName
      FROM photos ph JOIN places p ON p.id = ph.place_id
      WHERE ph.user_id = ? AND ph.status = 'published'
      ORDER BY ph.created_at DESC`
   )
     .bind(c.get("user").id)
-    .all();
-  return c.json({ count: results.length, photos: results });
+    .all<{ id: string; createdAt: string; placeId: string; placeName: string }>();
+  const photos = results.map((p) => ({ ...p, url: `/photos/${p.id}` }));
+  return c.json({ count: photos.length, photos });
 });
 
 app.onError((err, c) => {
