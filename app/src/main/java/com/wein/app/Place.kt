@@ -44,6 +44,9 @@ data class Place(
     // Populated from the backend; blank/null for the bundled seed entries.
     val id: String = "",
     val phone: String? = null,
+    // Whether the signed-in user has bookmarked this place (from authed GET /places/:id
+    // or /me/saved). Always false for the bundled seed / when signed out.
+    val saved: Boolean = false,
 ) {
     val latLng: LatLng get() = LatLng(lat, lng)
     val priceText: String get() = if (price <= 0) "" else "$".repeat(price)
