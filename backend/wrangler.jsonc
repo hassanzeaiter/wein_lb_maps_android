@@ -12,9 +12,7 @@
     {
       "binding": "DB",
       "database_name": "wein",
-      // Local dev (`wrangler dev` / `--local`) ignores this; replace with the real id
-      // from `wrangler d1 create wein` before deploying (needs Cloudflare auth).
-      "database_id": "REPLACE_AFTER_d1_create",
+      "database_id": "a3173162-abea-46da-9016-6e9989d62cf2",
       "migrations_dir": "migrations"
     }
   ]

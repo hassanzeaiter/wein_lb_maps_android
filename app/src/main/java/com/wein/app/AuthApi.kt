@@ -4,8 +4,13 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Shared backend base URL (emulator → host `wrangler dev`; deployed Worker on a device). */
-internal const val API_BASE_URL = "http://10.0.2.2:8787"
+/**
+ * Shared backend base URL. Points at the deployed Cloudflare Worker (HTTPS), so it works on
+ * both the emulator and a real device. For local backend dev, swap to "http://10.0.2.2:8787"
+ * (emulator → host `wrangler dev`; the cleartext allowance for that host is in
+ * network_security_config.xml).
+ */
+internal const val API_BASE_URL = "https://wein-backend.hassanzeaiter-20-10.workers.dev"
 
 /** Result of a signup/login attempt. */
 sealed class AuthResult {
